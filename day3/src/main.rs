@@ -15,9 +15,9 @@ impl BatteryBank {
             let s:String = ch.into();
             s.parse::<u32>()
         }).collect();
-        let failures:Vec<&ParseIntError> = content.iter().filter(|r| r.is_err()).map(|r| r.as_ref().unwrap_err()).collect();
-        if failures.len() > 0 {
-            Err(format!("{} chars failed to parse", failures.len()).into())
+        let failures = content.iter().filter(|r| r.is_err()).map(|r| r.as_ref().unwrap_err()).count();
+        if failures > 0 {
+            Err(format!("{} chars failed to parse", failures).into())
         } else {
             Ok(
                 BatteryBank {
