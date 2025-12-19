@@ -40,28 +40,33 @@ impl ProductIdRange {
         if len <2 || (len % 2) !=0 { //we can't get a repeating pattern if it is not long enough, or if the number is odd
             false
         } else {
-            for chunk_count in 2..len+1 {
-                //Test the ID.  We start by splitting in half, then checking if the two halves are equal to each other.
-                //If so we return true; if not, we reduce the half-length and try again.
-                //We keep going until we find a point at which all splits are equal or we run out of string
-                let parts= split_into_n_segments(&id_str, chunk_count);
-                //println!(". at {} parts are {:?}", chunk_count, parts);
-                let matches = match parts.first() {
-                    Some(first)=>{
-                        //println!("elem is {}",first);
-                        if *first != id_str {
-                            parts.iter().all(|ent| ent==first)
-                        } else {
-                            false
-                        }
-                    },
-                    None=>false
-                };
-                if matches {
-                    return true
-                }
-            }
-            false
+            // The instructions say that the signature is "the same sequence of digits repeated twice". So we only need to split
+            // in half and check if the two halves match :shrug:
+            let parts = split_into_n_segments(&id_str, 2);
+            parts.len()==2 && parts[0] == parts[1]
+
+            // I'm keeping this old algorithm as I'm a bit more proud of it, it checks for any number of repeates in the sequence :D
+            // for chunk_count in 2..len+1 {
+            //     //Test the ID.  We start by splitting in half, then checking if the two halves are equal to each other.
+            //     //If so we return true; if not, we reduce the half-length and try again.
+            //     //We keep going until we find a point at which all splits are equal or we run out of string
+            //     let parts= split_into_n_segments(&id_str, chunk_count);
+            //     //println!(". at {} parts are {:?}", chunk_count, parts);
+            //     let matches = match parts.first() {
+            //         Some(first)=>{
+            //             //println!("elem is {}",first);
+            //             if *first != id_str {
+            //                 parts.iter().all(|ent| ent==first)
+            //             } else {
+            //                 false
+            //             }
+            //         },
+            //         None=>false
+            //     };
+            //     if matches {
+            //         return true
+            //     }
+            // }
         }
     }
 
