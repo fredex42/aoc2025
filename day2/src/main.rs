@@ -37,36 +37,31 @@ impl ProductIdRange {
         //println!("is_borken testing {}", id_str);
 
         let len = id_str.len();
-        if len <2 || (len % 2) !=0 { //we can't get a repeating pattern if it is not long enough, or if the number is odd
+        if len <2 { //we can't get a repeating pattern if it is not long enough
             false
         } else {
-            // The instructions say that the signature is "the same sequence of digits repeated twice". So we only need to split
-            // in half and check if the two halves match :shrug:
-            let parts = split_into_n_segments(&id_str, 2);
-            parts.len()==2 && parts[0] == parts[1]
-
-            // I'm keeping this old algorithm as I'm a bit more proud of it, it checks for any number of repeates in the sequence :D
-            // for chunk_count in 2..len+1 {
-            //     //Test the ID.  We start by splitting in half, then checking if the two halves are equal to each other.
-            //     //If so we return true; if not, we reduce the half-length and try again.
-            //     //We keep going until we find a point at which all splits are equal or we run out of string
-            //     let parts= split_into_n_segments(&id_str, chunk_count);
-            //     //println!(". at {} parts are {:?}", chunk_count, parts);
-            //     let matches = match parts.first() {
-            //         Some(first)=>{
-            //             //println!("elem is {}",first);
-            //             if *first != id_str {
-            //                 parts.iter().all(|ent| ent==first)
-            //             } else {
-            //                 false
-            //             }
-            //         },
-            //         None=>false
-            //     };
-            //     if matches {
-            //         return true
-            //     }
-            // }
+            for chunk_count in 2..len+1 {
+                //Test the ID.  We start by splitting in half, then checking if the two halves are equal to each other.
+                //If so we return true; if not, we reduce the half-length and try again.
+                //We keep going until we find a point at which all splits are equal or we run out of string
+                let parts= split_into_n_segments(&id_str, chunk_count);
+                //println!(". at {} parts are {:?}", chunk_count, parts);
+                let matches = match parts.first() {
+                    Some(first)=>{
+                        //println!("elem is {}",first);
+                        if *first != id_str {
+                            parts.iter().all(|ent| ent==first)
+                        } else {
+                            false
+                        }
+                    },
+                    None=>false
+                };
+                if matches {
+                    return true
+                }
+            }
+            false
         }
     }
 
@@ -167,26 +162,30 @@ mod test {
         446443-446449 has one invalid ID, 446446.
         38593856-38593862 has one invalid ID, 38593859.
         */
-        let ranges:Vec<ProductIdRange> = ["11-22","95-115","998-1012","1188511880-1188511890","222220-222224","1698522-1698528","446443-446449","38593856-38593862"]
+        let ranges:Vec<ProductIdRange> = ["11-22","95-115","998-1012","1188511880-1188511890","222220-222224",
+            "1698522-1698528","446443-446449","38593856-38593862","565653-565659","824824821-824824827","2121212118-2121212124"]
             .into_iter()
             .map(|s| ProductIdRange::from_string(s))
             .map(|result| result.unwrap())  //meh, we can crash a test :D
             .collect();
 
         assert_eq!(ranges[0].find_broken_ids(), vec![11,22]);
-        assert_eq!(ranges[1].find_broken_ids(), vec![99]);
-        assert_eq!(ranges[2].find_broken_ids(), vec![1010]);
+        assert_eq!(ranges[1].find_broken_ids(), vec![99, 111]);
+        assert_eq!(ranges[2].find_broken_ids(), vec![999, 1010]);
         assert_eq!(ranges[3].find_broken_ids(), vec![1188511885]);
         assert_eq!(ranges[4].find_broken_ids(), vec![222222]);
         assert_eq!(ranges[5].find_broken_ids(), vec![]);
         assert_eq!(ranges[6].find_broken_ids(), vec![446446]);
         assert_eq!(ranges[7].find_broken_ids(), vec![38593859]);
+        assert_eq!(ranges[8].find_broken_ids(), vec![565656]);
+        assert_eq!(ranges[9].find_broken_ids(), vec![824824824]);
+        assert_eq!(ranges[10].find_broken_ids(), vec![2121212121]);
 
         let sum = ranges.into_iter()
             .map(|r| r.find_broken_ids())
             .flatten()
             .reduce(|sum, elem| sum+elem);
 
-        assert_eq!(sum, Some(1227775554));
+        assert_eq!(sum, Some(4174379265));
     }
 }
