@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::{collections::VecDeque, error::Error, fs::File, io::Read};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 /**
  * Represents a range of product IDs, inclusive
@@ -44,12 +44,13 @@ impl ProductIdRange {
     }
 
     pub fn size(&self) -> u64 {
-        println!("Size of {:?} is {}", self, self.end-self.start+1);
+        //println!("Size of {:?} is {}", self, self.end-self.start+1);
         self.end-self.start+1   //+1 because the range is inclusive
     }
 
     pub fn overlaps(&self, other:&ProductIdRange) -> bool {
-        (self.start >=other.start && self.start <= other.end) || (self.end <= other.end && self.end >= other.start)
+        (self.start >=other.start && self.start <= other.end) || (self.end <= other.end && self.end >= other.start) ||
+            (other.start >= self.start && other.start <= self.end) || (other.end <= self.end && other.end >= self.start)
     }
 
     /**
@@ -69,10 +70,10 @@ impl ProductIdRange {
                 other.end
              };
 
-            println!("{:?} overlaps with {:?} to give {} {}", self, other, start, end);
+            //println!("{:?} overlaps with {:?} to give {} {}", self, other, start, end);
             Some(ProductIdRange { start, end })
         } else {
-            println!("{:?} does not overlap with {:?}", self, other);
+            //println!("{:?} does not overlap with {:?}", self, other);
             None
         }
     }
@@ -86,7 +87,7 @@ pub fn coalesce_overlapping_ranges(mut ranges:Vec<ProductIdRange>) -> Vec<Produc
         return ranges;
     }
 
-    let mut result:Vec<ProductIdRange> = vec![];
+    let mut result:Vec<ProductIdRange> = Vec::with_capacity(ranges.len());
     ranges.sort();
 
     let mut q:VecDeque<ProductIdRange> = ranges.into();
@@ -105,16 +106,6 @@ pub fn coalesce_overlapping_ranges(mut ranges:Vec<ProductIdRange>) -> Vec<Produc
     }
     //When we get to the end, we still have the last range in play
     result.push(current);
-
-    // for mut i in 0..ranges.len()-1 {
-    //     match ranges[i].coalesce(&ranges[i+1]) {
-    //         Some(overlap)=>{
-    //             result.push(overlap);
-    //             i+=1;   //skip the next one as we have already covered it
-    //         },
-    //         None=>result.push(ranges[i])
-    //     }
-    // }
     result
 }
 
@@ -273,4 +264,41 @@ mod test {
         let total:u64 = deduplicated_ranges.iter().map(|r| r.size()).sum();
         assert_eq!(total, 14);
     }
+
+    #[test]
+    fn test_overlap_complete() {
+        //Handle completely overlapping regions
+        let range_a = ProductIdRange::from_string("123-456").unwrap();
+        let range_b = ProductIdRange::from_string("200-300").unwrap();
+        let combined = range_a.coalesce(&range_b);
+        assert_eq!(combined, Some(ProductIdRange { start: 123, end: 456 }));
+    }
+
+    #[test]
+    fn test_overlap_partial_hi() {
+        //Handle partially overlapping regions at the high end
+        let range_a = ProductIdRange::from_string("123-456").unwrap();
+        let range_b = ProductIdRange::from_string("400-500").unwrap();
+        let combined = range_a.coalesce(&range_b);
+        assert_eq!(combined, Some(ProductIdRange { start: 123, end: 500 }));
+    }
+
+    #[test]
+    fn test_overlap_partial_lo() {
+        //Handle partially overlapping regions at the low end
+        let range_a = ProductIdRange::from_string("123-456").unwrap();
+        let range_b = ProductIdRange::from_string("100-150").unwrap();
+        let combined = range_a.coalesce(&range_b);
+        assert_eq!(combined, Some(ProductIdRange { start: 100, end: 456 }));
+    }
+
+    #[test]
+    fn test_overlap_partial_none() {
+        //Handle non-overlapping regions
+        let range_a = ProductIdRange::from_string("123-456").unwrap();
+        let range_b = ProductIdRange::from_string("567-789").unwrap();
+        let combined = range_a.coalesce(&range_b);
+        assert_eq!(combined, None);
+    }
+
 }
