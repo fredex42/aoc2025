@@ -1,5 +1,4 @@
 use std::{error::Error, fs::File, io::Read};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Slot {
@@ -80,6 +79,13 @@ impl WarehouseGrid {
         }
     }
 
+    fn count_total(&self) -> usize {
+        self.contents.iter().map(|row| row.iter().filter(|slot| match slot {
+            Slot::Empty=>false,
+            Slot::Occupied=>true
+        }).count()).sum()
+    }
+
     fn availability_for(&self, row:i32, col:i32) -> Result<SlotMobility, Box<dyn Error>> {
         match self.at(row, col) {
             Some(Slot::Occupied)=>{
@@ -119,9 +125,9 @@ impl WarehouseGrid {
                     let mut new_row:Vec<SlotMobility> = vec![];
                     for col in 0..width {
                         let availability = self.availability_for(row.try_into().unwrap(), col.try_into().unwrap())?;
-                        if row==0 {
-                            println!("{}: {:?}", row, availability);
-                        }
+                        // if row==0 {
+                        //     println!("{}: {:?}", row, availability);
+                        // }
                         new_row.push(availability);
                     }
                     new_cols.push(new_row);
@@ -205,16 +211,44 @@ impl WarehouseAvailability {
         }
         temp.join("\n")
     }
+
+    /**
+     * Removes the accessible rolls and returns the new warehouse state
+     */
+    pub fn next_state(&self) -> WarehouseGrid {
+        let contents:Vec<Vec<Slot>> = self.contents.iter().map(|row| {
+            row.iter().map(|slot| match slot {
+                SlotMobility::Empty=>Slot::Empty,
+                SlotMobility::Accessible=>Slot::Empty,
+                SlotMobility::Immovable=>Slot::Occupied
+            }).collect()
+        }).collect();
+
+        WarehouseGrid { contents }
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
     let mut f = File::open("input.txt")?;
     let mut content = String::new();
     f.read_to_string(&mut content)?;
-    let grid = WarehouseGrid::from_string(&content)?;
-    let accessible_count = grid.count_accessible()?;
-    println!("There are {} accessible rolls", accessible_count);
-    
+
+    let mut grid = WarehouseGrid::from_string(&content)?;
+    let mut i = 0;
+    let mut total_moved = 0;
+
+    loop {
+        i += 1;
+        let accessible_count = grid.count_accessible()?;
+        let availability = grid.map_accessible()?;
+        grid = availability.next_state();
+        total_moved += accessible_count;
+        println!("Step {}: there are {} accessible rolls with {} remaining in warehouse", i, accessible_count, grid.count_total());
+        if accessible_count==0 {
+            break;
+        }
+    }
+    println!("A total of {} rolls were moved", total_moved);
     Ok( () )
 }
 
@@ -301,5 +335,50 @@ mod test {
 
         let availability = grid.map_accessible().unwrap();
         println!("{}", availability.render());
+    }
+
+    #[test]
+    fn test_state_removal() {
+        let grid_desc = "..@@.@@@@.
+@@@.@.@.@@
+@@@@@.@.@@
+@.@@@@..@.
+@@.@@@@.@@
+.@@@@@@@.@
+.@.@.@.@@@
+@.@@@.@@@@
+.@@@@@@@@.
+@.@.@@@.@.
+";
+        let second_state = "..xx.xx@x.
+x@@.@.@.@@
+@@@@@.x.@@
+@.@@@@..@.
+x@.@@@@.@x
+.@@@@@@@.@
+.@.@.@.@@@
+x.@@@.@@@@
+.@@@@@@@@.
+x.x.@@@.x.";
+
+        let third_state = ".......x..
+.@@.x.x.@x
+x@@@@...@@
+x.@@@@..x.
+.@.@@@@.x.
+.x@@@@@@.x
+.x.@.@.@@@
+..@@@.@@@@
+.x@@@@@@@.
+....@@@...";
+
+        let initial_grid = WarehouseGrid::from_string(grid_desc).unwrap();
+        let availability = initial_grid.map_accessible().unwrap();
+        assert_eq!(availability.render(), second_state);
+        assert_eq!(initial_grid.count_accessible().unwrap(), 13);
+        let next_grid = availability.next_state();
+        assert_eq!(next_grid.count_accessible().unwrap(), 12);
+        let next_availability = next_grid.map_accessible().unwrap().render();
+        assert_eq!(next_availability, third_state);
     }
 }
