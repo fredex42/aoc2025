@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, fs::File, io::Read};
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -208,6 +208,13 @@ impl WarehouseAvailability {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let mut f = File::open("input.txt")?;
+    let mut content = String::new();
+    f.read_to_string(&mut content)?;
+    let grid = WarehouseGrid::from_string(&content)?;
+    let accessible_count = grid.count_accessible()?;
+    println!("There are {} accessible rolls", accessible_count);
+    
     Ok( () )
 }
 
