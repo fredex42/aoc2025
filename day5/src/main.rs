@@ -1,6 +1,6 @@
 use regex::Regex;
 use std::{error::Error, fs::File, io::Read};
-use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator};
 
 /**
  * Represents a range of product IDs, inclusive
@@ -29,6 +29,10 @@ impl ProductIdRange {
 
     pub fn contains(&self, id:u64) -> bool {
         id >= self.start && id <= self.end
+    }
+
+    pub fn size(&self) -> u64 {
+        self.end-self.start+1   //+1 because the range is inclusive
     }
 }
 
@@ -81,16 +85,31 @@ fn main() ->Result<(), Box<dyn Error>> {
 
     let (ranges, ids) = parse(&content)?;
     let spoiled = find_spoiled(&ranges, &ids);
-    println!("Spoiled ingredient IDs: {}", spoiled.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(";"));
+    //println!("Spoiled ingredient IDs: {}", spoiled.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(";"));
 
     let fresh_count = ids.len() - spoiled.len();
     println!("Out of a total of {} ingredients, {} are fresh", ids.len(), fresh_count);
 
+    //Bit of a hack... let's find the largest ingredient ID, and just brute-force our way through the
+    //lot using Rayon
+    let highest_id:u64 = ranges.iter().fold(0_u64, |max, elem| if max<elem.end {
+        elem.end
+    } else {
+        max
+    });
+
+    let total = (0..highest_id+1).into_par_iter()
+        .filter(|id| ranges.par_iter().any(|range| range.contains(*id)))
+        .count();
+
+    println!("Total fresh ingredients: {}", total);
     Ok( () )
 }
 
 #[cfg(test)]
 mod test {
+    use rayon::iter::IntoParallelIterator;
+
     use super::*;
 
     #[test]
@@ -143,5 +162,41 @@ mod test {
         assert_eq!(spoiled[1], 8);
         assert_eq!(spoiled[2], 32);
         assert_eq!(spoiled.len(), 3)
+    }
+
+    #[test]
+    fn test_size() {
+        let example_data = "3-5
+10-14
+16-20
+12-18
+
+1
+5
+8
+11
+17
+32
+";
+        let (ranges, _) = parse(&example_data).unwrap();
+        assert_eq!(ranges[0].size(), 3);    //3, 4, 5
+        assert_eq!(ranges[1].size(), 5);    //10, 11, 12, 13, 14
+
+        // //Doesn't work; some ids are in multiple ranges.  So, we need to de-duplicate the ranges first
+        // let total:u64 = ranges.iter().map(|r| r.size()).sum();
+
+        //Bit of a hack... let's find the largest ingredient ID, and just brute-force our way through the
+        //lot using Rayon
+        let highest_id:u64 = ranges.iter().fold(0_u64, |max, elem| if max<elem.end {
+            elem.end
+        } else {
+            max
+        });
+
+        let total = (0..highest_id+1).into_par_iter()
+            .filter(|id| ranges.par_iter().any(|range| range.contains(*id)))
+            .count();
+
+        assert_eq!(total, 14);
     }
 }
