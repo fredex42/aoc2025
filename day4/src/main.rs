@@ -1,14 +1,25 @@
 use std::error::Error;
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Slot {
     Empty,
     Occupied
 }
 
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum SlotMobility {
+    Empty,
+    Accessible,
+    Immovable
+}
+
 pub struct WarehouseGrid {
     contents: Vec<Vec<Slot>>
+}
+
+pub struct WarehouseAvailability {
+    contents: Vec<Vec<SlotMobility>>
 }
 
 impl WarehouseGrid {
@@ -65,6 +76,62 @@ impl WarehouseGrid {
         }
     }
 
+    fn availability_for(&self, row:usize, col:usize) -> Result<SlotMobility, Box<dyn Error>> {
+        match self.at(row, col) {
+            Some(Slot::Occupied)=>{
+                if row==0 || row==self.height() || col==0 || col==self.width() {
+                    //If a slot on the edge is occupied, it's available by definition
+                    Ok(SlotMobility::Accessible)
+                } else {
+                    let surrounding_count = vec![
+                        self.at(row-1, col-1),
+                        self.at(row, col-1),
+                        self.at(row+1, col-1),
+                        self.at(row-1, col),
+                        self.at(row+1, col),
+                        self.at(row-1, col+1),
+                        self.at(row, col+1),
+                        self.at(row+1, col+1)
+                    ].into_iter().filter(|s| match s {
+                        Some(Slot::Occupied)=>true,
+                        _=>false
+                    }).count();
+                    //Instructions say that if there are less than for adjacent occupied slots, the slot is accessible
+                    if surrounding_count < 4 {
+                        Ok(SlotMobility::Accessible)
+                    } else {
+                        Ok(SlotMobility::Immovable)
+                    }
+                }
+            },
+            Some(Slot::Empty)=> Ok(SlotMobility::Empty),
+            None=>return Err("Grid was improperly shaped".into())
+        }
+    }
+
+    pub fn map_accessible(&self) -> Result<WarehouseAvailability, Box<dyn Error>> {
+        match self.contents.first().map(|v| v.len()) {
+            None=>Err("there was no content to search".into()),
+            Some(width)=>{
+                let height = self.contents.len();
+                let mut new_cols:Vec<Vec<SlotMobility>> = vec![];
+
+                for row in 0..height {
+                    let mut new_row:Vec<SlotMobility> = vec![];
+                    for col in 0..width {
+                        let availability = self.availability_for(row, col)?;
+                        if row==0 {
+                            println!("{}: {:?}", row, availability);
+                        }
+                        new_row.push(availability);
+                    }
+                    new_cols.push(new_row);
+                }
+                Ok(WarehouseAvailability { contents: new_cols })
+            }
+        }
+    }
+
     /**
      * The forklifts can only access a roll of paper if there are fewer than four rolls of paper in the eight adjacent positions. 
      * Count how many occupied slots have less than 4 rolls of paper around them
@@ -76,33 +143,11 @@ impl WarehouseGrid {
                 let height = self.contents.len();
                 for col in 0..width {
                     for row in 0..height {
-                        match self.at(row, col) {
-                            Some(Slot::Occupied)=>{
-                                if row==0 || row==height || col==0 || col==width {
-                                    //If a slot on the edge is occupied, it's available by definition
-                                    count += 1;
-                                } else {
-                                    let surrounding_count = vec![
-                                        self.at(row-1, col-1),
-                                        self.at(row, col-1),
-                                        self.at(row+1, col-1),
-                                        self.at(row-1, col),
-                                        self.at(row+1, col),
-                                        self.at(row-1, col+1),
-                                        self.at(row, col+1),
-                                        self.at(row+1, col+1)
-                                    ].into_par_iter().filter(|s| match s {
-                                        Some(Slot::Occupied)=>true,
-                                        _=>false
-                                    }).count();
-                                    //Instructions say that if there are less than for adjacent occupied slots, the slot is accessible
-                                    if surrounding_count < 4 {
-                                        count += 1
-                                    }
-                                }
-                            },
-                            Some(Slot::Empty)=> {},
-                            None=>return Err("Grid was improperly shaped".into())
+                        let availability = self.availability_for(row, col)?;
+                        match availability {
+                            SlotMobility::Accessible=>count+=1,
+                            SlotMobility::Immovable=>{},
+                            SlotMobility::Empty=>{}
                         }
                     }
                 }
@@ -110,6 +155,56 @@ impl WarehouseGrid {
             },
             None=>Err("there was no content to search".into())
         }
+    }
+    
+    pub fn render(&self) -> String {
+        let mut temp:Vec<String> = vec![];
+        for row in 0..self.height() {
+            let mut temprow:Vec<char> = vec![];
+            for col in 0..self.width() {
+                match self.at(row, col) {
+                    Some(Slot::Empty)=>temprow.push('.'),
+                    Some(Slot::Occupied)=>temprow.push('@'),
+                    None=>temprow.push('!')
+                }
+            }
+            temp.push(temprow.iter().collect())
+        }
+        temp.join("\n")
+    }
+}
+
+impl WarehouseAvailability {
+    pub fn at(&self, row:usize, col:usize) -> Option<SlotMobility> {
+        self.contents.get(row).map(|r| r.get(col)).flatten().map(|s| *s)
+    }
+
+    pub fn height(&self)->usize {
+        self.contents.len()
+    }
+
+    pub fn width(&self)->usize { 
+        match self.contents.first() {
+            Some(row)=>row.len(),
+            None=>0
+        }
+    }
+
+    pub fn render(&self) -> String {
+        let mut temp:Vec<String> = vec![];
+        for row in 0..self.height() {
+            let mut temprow:Vec<char> = vec![];
+            for col in 0..self.width() {
+                match self.at(row, col) {
+                    Some(SlotMobility::Empty)=>temprow.push('.'),
+                    Some(SlotMobility::Accessible)=>temprow.push('x'),
+                    Some(SlotMobility::Immovable)=>temprow.push('@'),
+                    None=>temprow.push('!')
+                }
+            }
+            temp.push(temprow.iter().collect())
+        }
+        temp.join("\n")
     }
 }
 
@@ -141,5 +236,64 @@ mod test {
         assert_eq!(grid.width(), 10);
 
         assert_eq!(grid.count_accessible().unwrap(), 13);
+    }
+
+    #[test]
+    fn test_at() {
+        let grid_desc = "..@@.@@@@.
+@@@.@.@.@@
+@@@@@.@.@@
+@.@@@@..@.
+@@.@@@@.@@
+.@@@@@@@.@
+.@.@.@.@@@
+@.@@@.@@@@
+.@@@@@@@@.
+@.@.@@@.@.
+";
+        let grid = WarehouseGrid::from_string(grid_desc).unwrap();
+        assert_eq!(grid.at(0, 0), Some(Slot::Empty));
+        assert_eq!(grid.at(0, 1), Some(Slot::Empty));
+        assert_eq!(grid.at(0, 2), Some(Slot::Occupied));
+        assert_eq!(grid.at(0, 3), Some(Slot::Occupied));
+        assert_eq!(grid.at(0, 4), Some(Slot::Empty));
+    }
+
+    #[test]
+    fn test_read() {
+        let grid_desc = "..@@.@@@@.
+@@@.@.@.@@
+@@@@@.@.@@
+@.@@@@..@.
+@@.@@@@.@@
+.@@@@@@@.@
+.@.@.@.@@@
+@.@@@.@@@@
+.@@@@@@@@.
+@.@.@@@.@.";
+        let grid = WarehouseGrid::from_string(grid_desc).unwrap();
+        assert_eq!(grid.render(), grid_desc);
+    }
+
+    #[test]
+    fn test_showmap() {
+        let grid_desc = "..@@.@@@@.
+@@@.@.@.@@
+@@@@@.@.@@
+@.@@@@..@.
+@@.@@@@.@@
+.@@@@@@@.@
+.@.@.@.@@@
+@.@@@.@@@@
+.@@@@@@@@.
+@.@.@@@.@.
+";
+
+        let grid = WarehouseGrid::from_string(grid_desc).unwrap();
+        assert_eq!(grid.height(), 10);
+        assert_eq!(grid.width(), 10);
+
+        let availability = grid.map_accessible().unwrap();
+        println!("{}", availability.render());
     }
 }
