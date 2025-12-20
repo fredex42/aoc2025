@@ -81,6 +81,8 @@ fn main() ->Result<(), Box<dyn Error>> {
 
     let (ranges, ids) = parse(&content)?;
     let spoiled = find_spoiled(&ranges, &ids);
+    println!("Spoiled ingredient IDs: {}", spoiled.iter().map(|n| n.to_string()).collect::<Vec<String>>().join(";"));
+
     let fresh_count = ids.len() - spoiled.len();
     println!("Out of a total of {} ingredients, {} are fresh", ids.len(), fresh_count);
 
