@@ -1,4 +1,5 @@
 use std::{error::Error, fs::File, io::Read};
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Slot {
@@ -125,9 +126,6 @@ impl WarehouseGrid {
                     let mut new_row:Vec<SlotMobility> = vec![];
                     for col in 0..width {
                         let availability = self.availability_for(row.try_into().unwrap(), col.try_into().unwrap())?;
-                        // if row==0 {
-                        //     println!("{}: {:?}", row, availability);
-                        // }
                         new_row.push(availability);
                     }
                     new_cols.push(new_row);
@@ -216,7 +214,7 @@ impl WarehouseAvailability {
      * Removes the accessible rolls and returns the new warehouse state
      */
     pub fn next_state(&self) -> WarehouseGrid {
-        let contents:Vec<Vec<Slot>> = self.contents.iter().map(|row| {
+        let contents:Vec<Vec<Slot>> = self.contents.par_iter().map(|row| {
             row.iter().map(|slot| match slot {
                 SlotMobility::Empty=>Slot::Empty,
                 SlotMobility::Accessible=>Slot::Empty,
