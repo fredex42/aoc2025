@@ -61,8 +61,12 @@ impl WarehouseGrid {
         }
     }
 
-    pub fn at(&self, row:usize, col:usize) -> Option<Slot> {
-        self.contents.get(row).map(|r| r.get(col)).flatten().map(|s| *s)
+    pub fn at(&self, row:i32, col:i32) -> Option<Slot> {
+        if row<0 || col<0 {
+            None
+        } else {
+            self.contents.get(row as usize)?.get(col as usize).copied()
+        }
     }
 
     pub fn height(&self)->usize {
@@ -76,13 +80,9 @@ impl WarehouseGrid {
         }
     }
 
-    fn availability_for(&self, row:usize, col:usize) -> Result<SlotMobility, Box<dyn Error>> {
+    fn availability_for(&self, row:i32, col:i32) -> Result<SlotMobility, Box<dyn Error>> {
         match self.at(row, col) {
             Some(Slot::Occupied)=>{
-                if row==0 || row==self.height() || col==0 || col==self.width() {
-                    //If a slot on the edge is occupied, it's available by definition
-                    Ok(SlotMobility::Accessible)
-                } else {
                     let surrounding_count = vec![
                         self.at(row-1, col-1),
                         self.at(row, col-1),
@@ -102,7 +102,6 @@ impl WarehouseGrid {
                     } else {
                         Ok(SlotMobility::Immovable)
                     }
-                }
             },
             Some(Slot::Empty)=> Ok(SlotMobility::Empty),
             None=>return Err("Grid was improperly shaped".into())
@@ -119,7 +118,7 @@ impl WarehouseGrid {
                 for row in 0..height {
                     let mut new_row:Vec<SlotMobility> = vec![];
                     for col in 0..width {
-                        let availability = self.availability_for(row, col)?;
+                        let availability = self.availability_for(row.try_into().unwrap(), col.try_into().unwrap())?;
                         if row==0 {
                             println!("{}: {:?}", row, availability);
                         }
@@ -143,7 +142,7 @@ impl WarehouseGrid {
                 let height = self.contents.len();
                 for col in 0..width {
                     for row in 0..height {
-                        let availability = self.availability_for(row, col)?;
+                        let availability = self.availability_for(row.try_into().unwrap(), col.try_into().unwrap())?;
                         match availability {
                             SlotMobility::Accessible=>count+=1,
                             SlotMobility::Immovable=>{},
@@ -162,7 +161,7 @@ impl WarehouseGrid {
         for row in 0..self.height() {
             let mut temprow:Vec<char> = vec![];
             for col in 0..self.width() {
-                match self.at(row, col) {
+                match self.at(row.try_into().unwrap(), col.try_into().unwrap()) {
                     Some(Slot::Empty)=>temprow.push('.'),
                     Some(Slot::Occupied)=>temprow.push('@'),
                     None=>temprow.push('!')
