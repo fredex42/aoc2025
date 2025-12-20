@@ -1,14 +1,26 @@
 use regex::Regex;
-use std::{error::Error, fs::File, io::Read};
+use std::{collections::VecDeque, error::Error, fs::File, io::Read};
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator, IntoParallelIterator};
 
 /**
  * Represents a range of product IDs, inclusive
  */
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Eq)]
 pub struct ProductIdRange {
     start: u64,
     end: u64
+}
+
+impl Ord for ProductIdRange {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.start.cmp(&other.start)
+    }
+}
+
+impl PartialOrd for ProductIdRange {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.start.cmp(&other.start))
+    }
 }
 
 impl ProductIdRange {
@@ -32,8 +44,78 @@ impl ProductIdRange {
     }
 
     pub fn size(&self) -> u64 {
+        println!("Size of {:?} is {}", self, self.end-self.start+1);
         self.end-self.start+1   //+1 because the range is inclusive
     }
+
+    pub fn overlaps(&self, other:&ProductIdRange) -> bool {
+        (self.start >=other.start && self.start <= other.end) || (self.end <= other.end && self.end >= other.start)
+    }
+
+    /**
+     * If the two ranges overlap, returns a new range that encompasses both.
+     * If they do not overlap, then returns None
+     */
+    pub fn coalesce(&self, other:&ProductIdRange) -> Option<ProductIdRange> {
+        if self.overlaps(other) {
+            let start = if self.start<=other.start {
+                self.start
+             } else {
+                other.start
+             };
+             let end = if self.end>=other.end {
+                self.end
+             } else {
+                other.end
+             };
+
+            println!("{:?} overlaps with {:?} to give {} {}", self, other, start, end);
+            Some(ProductIdRange { start, end })
+        } else {
+            println!("{:?} does not overlap with {:?}", self, other);
+            None
+        }
+    }
+}
+
+/**
+ * Consumes a Vec of ProductIdRange, sorts it and coalesces overlapping regions
+ */
+pub fn coalesce_overlapping_ranges(mut ranges:Vec<ProductIdRange>) -> Vec<ProductIdRange> {
+    if ranges.is_empty() {
+        return ranges;
+    }
+
+    let mut result:Vec<ProductIdRange> = vec![];
+    ranges.sort();
+
+    let mut q:VecDeque<ProductIdRange> = ranges.into();
+
+    let mut current:ProductIdRange = q.pop_front().expect("There should be at least one item to coalesce!");
+    while !q.is_empty() {
+        let next = q.pop_front().expect("this should not happen");
+        match current.coalesce(&next) {
+            Some(combined)=>current = combined, //The ranges overlap, so combine them and keep going
+            None=>{
+                //We reached the end of the overlap.  `current` should now be a combination of every overlapping region up to this point
+                result.push(current);
+                current = next; //Resume starting with the next non-overlapping chunk
+            }
+        }
+    }
+    //When we get to the end, we still have the last range in play
+    result.push(current);
+
+    // for mut i in 0..ranges.len()-1 {
+    //     match ranges[i].coalesce(&ranges[i+1]) {
+    //         Some(overlap)=>{
+    //             result.push(overlap);
+    //             i+=1;   //skip the next one as we have already covered it
+    //         },
+    //         None=>result.push(ranges[i])
+    //     }
+    // }
+    result
 }
 
 /**
@@ -90,17 +172,8 @@ fn main() ->Result<(), Box<dyn Error>> {
     let fresh_count = ids.len() - spoiled.len();
     println!("Out of a total of {} ingredients, {} are fresh", ids.len(), fresh_count);
 
-    //Bit of a hack... let's find the largest ingredient ID, and just brute-force our way through the
-    //lot using Rayon
-    let highest_id:u64 = ranges.iter().fold(0_u64, |max, elem| if max<elem.end {
-        elem.end
-    } else {
-        max
-    });
-
-    let total = (0..highest_id+1).into_par_iter()
-        .filter(|id| ranges.par_iter().any(|range| range.contains(*id)))
-        .count();
+    let deduplicated_ranges= coalesce_overlapping_ranges(ranges);
+    let total:u64 = deduplicated_ranges.par_iter().map(|r| r.size()).sum();
 
     println!("Total fresh ingredients: {}", total);
     Ok( () )
@@ -108,8 +181,6 @@ fn main() ->Result<(), Box<dyn Error>> {
 
 #[cfg(test)]
 mod test {
-    use rayon::iter::IntoParallelIterator;
-
     use super::*;
 
     #[test]
@@ -187,16 +258,19 @@ mod test {
 
         //Bit of a hack... let's find the largest ingredient ID, and just brute-force our way through the
         //lot using Rayon
-        let highest_id:u64 = ranges.iter().fold(0_u64, |max, elem| if max<elem.end {
-            elem.end
-        } else {
-            max
-        });
+        // let highest_id:u64 = ranges.iter().fold(0_u64, |max, elem| if max<elem.end {
+        //     elem.end
+        // } else {
+        //     max
+        // });
 
-        let total = (0..highest_id+1).into_par_iter()
-            .filter(|id| ranges.par_iter().any(|range| range.contains(*id)))
-            .count();
+        // let total = (0..highest_id+1).into_par_iter()
+        //     .filter(|id| ranges.par_iter().any(|range| range.contains(*id)))
+        //     .count();
 
+        //Proper way of doing it... hopefully!
+        let deduplicated_ranges = coalesce_overlapping_ranges(ranges);
+        let total:u64 = deduplicated_ranges.iter().map(|r| r.size()).sum();
         assert_eq!(total, 14);
     }
 }
