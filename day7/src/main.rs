@@ -1,4 +1,4 @@
-use std::{error::Error};
+use std::{error::Error, fs::File, io::Read};
 
 #[derive(Clone, Copy, PartialEq)]
 pub enum EnvironmentCell {
@@ -30,6 +30,7 @@ impl EnvironmentCell {
 
 pub struct Environment {
     space: Vec<Vec<EnvironmentCell>>,
+    pub split_count: usize
 }
 
 impl Environment {
@@ -54,7 +55,7 @@ impl Environment {
             },
             _=> { }
         }
-        space.map(|space| Environment { space })
+        space.map(|space| Environment { space, split_count: 0 })
     }
 
     /**
@@ -86,6 +87,7 @@ impl Environment {
                 //  Normally the space below gets occupied, unless there is a splitter in which case n-1 and n+1 get occupied (splitter stays)
                 EnvironmentCell::BeamEntry | EnvironmentCell::Occupied=>{
                     if self.space[row+1][col] == EnvironmentCell::Splitter {
+                        self.split_count+=1;
                         if col>0 {
                             self.space[row+1][col-1] = EnvironmentCell::Occupied;
                         }
@@ -105,9 +107,25 @@ impl Environment {
         //println!("{}: input {} output {}", row, String::from_iter(self.space[row].iter().map(|c| c.to_char())), String::from_iter(self.space[row+1].iter().map(|c| c.to_char())));
         Ok( () )
     }
+
+    pub fn count_output_beams(&self) -> usize {
+        self.space.last().map(|last_row| {
+            last_row.iter().filter(|cell| **cell==EnvironmentCell::Occupied).count()
+        }).unwrap_or(0)
+    }
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let mut f = File::open("input.txt")?;
+    let mut content = String::new();
+    f.read_to_string(&mut content)?;
+    let mut environment = Environment::from_string(&content)?;
+
+    let steps = content.lines().count()-1;
+    for i in 0..steps {
+        environment.propagate(i)?;
+    }
+    println!("The final number of times the beam was split is {}", environment.split_count);
     Ok( () )
 }
 
@@ -286,5 +304,6 @@ mod test {
         }
 
         assert_eq!(environment.to_string(), expected_output);
+        assert_eq!(environment.split_count, 21);
     }
 }
