@@ -3,7 +3,7 @@ use std::{error::Error, fs::File, io::Read};
 #[derive(Clone, Copy, PartialEq)]
 pub enum EnvironmentCell {
     Empty,
-    Occupied,
+    Occupied(usize),
     BeamEntry,
     Splitter
 }
@@ -30,7 +30,8 @@ impl EnvironmentCell {
 
 pub struct Environment {
     space: Vec<Vec<EnvironmentCell>>,
-    pub split_count: usize
+    pub split_count: usize,
+    pub timeline_count: usize,
 }
 
 impl Environment {
@@ -55,7 +56,7 @@ impl Environment {
             },
             _=> { }
         }
-        space.map(|space| Environment { space, split_count: 0 })
+        space.map(|space| Environment { space, split_count: 0, timeline_count: 0 })
     }
 
     /**
@@ -88,11 +89,18 @@ impl Environment {
                 EnvironmentCell::BeamEntry | EnvironmentCell::Occupied=>{
                     if self.space[row+1][col] == EnvironmentCell::Splitter {
                         self.split_count+=1;
+                        self.timeline_count+=2; //we divide at this point - 2 timelines
                         if col>0 {
                             self.space[row+1][col-1] = EnvironmentCell::Occupied;
+                        } else {
+                            //the beam left the diagram, so subtract
+                            self.timeline_count-=1;
                         }
                         if col<self.width() {
                             self.space[row+1][col+1] = EnvironmentCell::Occupied;
+                        } else {
+                            //the beam left the diagram, so subtract
+                            self.timeline_count-=1;
                         }
                     } else {
                         self.space[row+1][col] = EnvironmentCell::Occupied;
@@ -305,5 +313,53 @@ mod test {
 
         assert_eq!(environment.to_string(), expected_output);
         assert_eq!(environment.split_count, 21);
+    }
+
+    #[test]
+    fn test_example_part2() {
+        let input = ".......S.......
+...............
+.......^.......
+...............
+......^.^......
+...............
+.....^.^.^.....
+...............
+....^.^...^....
+...............
+...^.^...^.^...
+...............
+..^...^.....^..
+...............
+.^.^.^.^.^...^.
+...............";
+
+        let expected_output = ".......S.......
+.......|.......
+......|^|......
+......|.|......
+.....|^|^|.....
+.....|.|.|.....
+....|^|^|^|....
+....|.|.|.|....
+...|^|^|||^|...
+...|.|.|||.|...
+..|^|^|||^|^|..
+..|.|.|||.|.|..
+.|^|||^||.||^|.
+.|.|||.||.||.|.
+|^|^|^|^|^|||^|
+|.|.|.|.|.|||.|";
+
+        let steps = input.lines().count()-1;    //we can't propagate the last line as it has nowhere to go
+
+        let mut environment = Environment::from_string(&input).unwrap();
+
+        for i in 0..steps {
+            environment.propagate(i).expect("propagation failed!");
+        }
+
+        assert_eq!(environment.to_string(), expected_output);
+        assert_eq!(environment.timeline_count, 40);
     }
 }
