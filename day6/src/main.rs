@@ -1,4 +1,4 @@
-use std::{error::Error, fs::File, io::Read, num::ParseIntError, ptr::null};
+use std::{error::Error, fs::File, io::Read, num::ParseIntError};
 use regex::Regex;
 use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
@@ -112,28 +112,57 @@ pub fn parse_input_v2(input:&str) -> Result<Vec<MathProblem>, Box<dyn Error>> {
         None=>return Err("there was not enough data to determine a key".into())
     };
 
-    println!("col_key is {:?}", col_key);
-
     //Now slice the lines to get the entries
-    let entries:Vec<Vec<&str>> = lines.iter().map(|line| {
+    let entries:Vec<Vec<&str>> = lines.par_iter().map(|line| {
         let mut line_entries:Vec<&str> = Vec::with_capacity(col_key.len());
         for i in 0..col_key.len() {
             let from = col_key[i];
             let to = if i==col_key.len()-1 {
-                line.len()
+                line.len()+1
             } else {
                 col_key[i+1]
             };
-            
-            println!("from {} to {}", from, to);
-            line_entries.push(&line[from..to]);
+            line_entries.push(&line[from..to-1]);
         }
         line_entries
     }).collect();
 
-    println!("Got entries: {:?}", entries);
+    //Transpose to group them correctly
+    let new_shape_entries = transpose(&entries, "")?;
+    //println!("Got entries: {:?}", new_shape_entries);
 
-    Ok( vec![] )
+    //Now we transpose again, to get numbers made from columns not rows.  This gets our actual numbers
+    let rearranged_words_res:Result<Vec<(Operation, Vec<String>)>, Box<dyn Error>> = new_shape_entries.into_iter().map(|prob| {
+        match prob.split_last() {
+            Some((op, terms))=>{
+                let per_char:Vec<Vec<char>> = terms.iter().map(|t| t.chars().collect()).collect();
+                let transposed_chars = transpose(&per_char, ' ')?;
+                //we should read from the bottom up, so reverse the order
+                let transposed_words: Vec<String> = transposed_chars.iter().map(|word| word.iter().collect()).rev().collect();
+                
+                let opsym = match op.trim() {
+                    "+"=>Operation::Add,
+                    "-"=>Operation::Sub,
+                    "*"=>Operation::Mul,
+                    "/"=>Operation::Div,
+                    _=>return Err(format!("invalid operation specifier {}", op).into())
+                };
+                Ok(( opsym, transposed_words ))
+            },
+            None=>Err("the problem was not correctly formatted".into())
+        }
+    }).collect();
+
+    let rearranged_words = rearranged_words_res?;
+    //println!("res: {:?}", rearranged_words);
+
+    let result:Result<Vec<MathProblem>, ParseIntError> = rearranged_words.into_iter().map(|(op, words)| {
+        let maybe_terms:Result<Vec<i64>, ParseIntError> = words.par_iter().map(|w| w.trim().parse::<i64>()).collect();
+
+        maybe_terms.map(|terms| MathProblem { terms, op })
+    }).collect();
+
+    result.map_err(|e| e.into())
 }
 
 fn main() -> Result<(), Box<dyn Error>>{
@@ -144,6 +173,10 @@ fn main() -> Result<(), Box<dyn Error>>{
     let probs = parse_input(&contents)?;
     let total:i64 = probs.par_iter().map(|p| p.calculate().expect("missing content for a problem?")).sum();
     println!("Grand total for {} input problems is {}", probs.len(), total);
+
+    let probs_v2 = parse_input_v2(&contents)?;
+    let total_v2:i64 = probs_v2.par_iter().map(|p| p.calculate().expect("missing content for a problem?")).sum();
+    println!("Grand total for {} input problems using v2 is {}", probs.len(), total_v2);
     Ok( () )
 }
 
@@ -178,12 +211,28 @@ mod test {
     }
 
     #[test]
+    fn test_example_parse_v2() {
+        let input = "123 328  51 64 
+ 45 64  387 23 
+  6 98  215 314
+*   +   *   +  ";
+        let probs = parse_input_v2(&input).unwrap();
+
+        assert_eq!(probs[3], MathProblem { terms: vec![4, 431, 623], op: Operation::Add});
+        assert_eq!(probs[2], MathProblem { terms: vec![175, 581, 32], op: Operation::Mul});
+        assert_eq!(probs[1], MathProblem { terms: vec![8, 248, 369], op: Operation::Add});
+        assert_eq!(probs[0], MathProblem { terms: vec![356, 24, 1], op: Operation::Mul});
+    }
+
+    #[test]
     fn test_example_v2() {
         let input = "123 328  51 64 
  45 64  387 23 
   6 98  215 314
 *   +   *   +  ";
-        let _ = parse_input_v2(&input).unwrap();
-
+        let probs = parse_input_v2(&input).unwrap();
+        let final_result:i64 = probs.par_iter().map(|p| p.calculate().expect("the problem was empty?")).sum();
+        assert_eq!(final_result, 3263827);
     }
+    
 }
