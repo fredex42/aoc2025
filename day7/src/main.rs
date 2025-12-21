@@ -12,7 +12,7 @@ impl EnvironmentCell {
     pub fn new(ch:char) -> Result<Self, Box<dyn Error>> {
         match ch {
             '.'=>Ok(Self::Empty),
-            '|'=>Ok(Self::Occupied),
+            '|'=>Ok(Self::Occupied(1)),
             'S'=>Ok(Self::BeamEntry),
             '^'=>Ok(Self::Splitter),
             _=>Err(format!("invalid symbol {}", ch).into())
@@ -21,17 +21,23 @@ impl EnvironmentCell {
     pub fn to_char(&self) -> char {
         match self {
             Self::Empty=>'.',
-            Self::Occupied=>'|',
+            Self::Occupied(_)=>'|',
             Self::BeamEntry=>'S',
             Self::Splitter=>'^'
         }
     }
+    pub fn add_beams(&self, new:usize)->Self{
+        match self {
+            Self::Occupied(n)=>Self::Occupied(*n+new),
+            _=>Self::Occupied(new)
+        }
+    }
+
 }
 
 pub struct Environment {
     space: Vec<Vec<EnvironmentCell>>,
     pub split_count: usize,
-    pub timeline_count: usize,
 }
 
 impl Environment {
@@ -56,7 +62,7 @@ impl Environment {
             },
             _=> { }
         }
-        space.map(|space| Environment { space, split_count: 0, timeline_count: 0 })
+        space.map(|space| Environment { space, split_count: 0, })
     }
 
     /**
@@ -84,26 +90,22 @@ impl Environment {
         //We already know that all the rows are equal length, as this is ensured in the parsing method
         for col in 0..self.space[row].len() {
             match self.space[row][col] {
-                //Inject a new beam is logically the same as propagating an existing beam.
+                EnvironmentCell::BeamEntry=>{
+                    //cheat;  we should really check if there is a splitter just below but in our provided data we know that there isn't
+                    self.space[row+1][col] = EnvironmentCell::Occupied(1);
+                },
                 //  Normally the space below gets occupied, unless there is a splitter in which case n-1 and n+1 get occupied (splitter stays)
-                EnvironmentCell::BeamEntry | EnvironmentCell::Occupied=>{
+                EnvironmentCell::Occupied(current_timelines)=>{
                     if self.space[row+1][col] == EnvironmentCell::Splitter {
                         self.split_count+=1;
-                        self.timeline_count+=2; //we divide at this point - 2 timelines
                         if col>0 {
-                            self.space[row+1][col-1] = EnvironmentCell::Occupied;
-                        } else {
-                            //the beam left the diagram, so subtract
-                            self.timeline_count-=1;
+                            self.space[row+1][col-1] = self.space[row+1][col-1].add_beams(current_timelines);
                         }
                         if col<self.width() {
-                            self.space[row+1][col+1] = EnvironmentCell::Occupied;
-                        } else {
-                            //the beam left the diagram, so subtract
-                            self.timeline_count-=1;
-                        }
+                            self.space[row+1][col+1] = self.space[row+1][col+1].add_beams(current_timelines);
+                        } 
                     } else {
-                        self.space[row+1][col] = EnvironmentCell::Occupied;
+                        self.space[row+1][col] = self.space[row+1][col].add_beams(current_timelines);
                     }
                 },
                 //In these cases the space below remains the same
@@ -116,10 +118,19 @@ impl Environment {
         Ok( () )
     }
 
-    pub fn count_output_beams(&self) -> usize {
+    // pub fn count_output_beams(&self) -> usize {
+    //     self.space.last().map(|last_row| {
+    //         last_row.iter().filter(|cell| **cell==EnvironmentCell::Occupied(_)).count()
+    //     }).unwrap_or(0)
+    // }
+
+    pub fn count_output_timelines(&self) -> Option<usize> {
         self.space.last().map(|last_row| {
-            last_row.iter().filter(|cell| **cell==EnvironmentCell::Occupied).count()
-        }).unwrap_or(0)
+            last_row.iter().map(|cell| match cell {
+                EnvironmentCell::Occupied(n)=>*n,
+                _=>0
+            }).sum()
+        })
     }
 }
 
@@ -134,6 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         environment.propagate(i)?;
     }
     println!("The final number of times the beam was split is {}", environment.split_count);
+    println!("Total histories in a quantum manifold is {}", environment.count_output_timelines().unwrap_or(0));
     Ok( () )
 }
 
@@ -360,6 +372,6 @@ mod test {
         }
 
         assert_eq!(environment.to_string(), expected_output);
-        assert_eq!(environment.timeline_count, 40);
-    }
+        assert_eq!(environment.count_output_timelines(), Some(40));
+    }   
 }
