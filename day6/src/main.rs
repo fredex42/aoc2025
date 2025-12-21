@@ -1,5 +1,6 @@
-use std::{error::Error, num::ParseIntError};
+use std::{error::Error, fs::File, io::Read, num::ParseIntError};
 use regex::Regex;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub enum Operation {
@@ -21,7 +22,7 @@ impl MathProblem {
             Operation::Mul=>self.terms.clone().into_iter().reduce(|total, term| total * term),
             Operation::Add=>self.terms.clone().into_iter().reduce(|total, term| total+term),
             Operation::Sub=>self.terms.clone().into_iter().reduce(|total, term| total - term),
-            Operation::Div=>self.terms.clone().into_iter().reduce(|total, term| total - term)
+            Operation::Div=>self.terms.clone().into_iter().reduce(|total, term| total / term)
         }
     }
 }
@@ -31,12 +32,11 @@ pub fn parse_input(input:&str) -> Result<Vec<MathProblem>, Box<dyn Error>> {
 
     let values:Vec<Vec<&str>> = input
         .split("\n")
+        .filter(|line| line.len()>1)
         .map(|line| {
             is_space.split(line.trim()).into_iter().collect()
         })
         .collect();
-
-    //println!("values: {:?}", values);
 
     //OK, so values currently goes row -> column (outer to inner).  We need to reverse it, into column -> row (outer to inner)
     
@@ -47,10 +47,12 @@ pub fn parse_input(input:&str) -> Result<Vec<MathProblem>, Box<dyn Error>> {
     let row_count = values.len();
     let col_count = values[0].len();
     //Sanity-check col_count
-    if values.iter().any(|row| row.len()!=col_count) {
-        return Err("the incoming data was not square".into());
+    if values.iter().any(|row| {
+        row.len()!=col_count
+    }) {
+        return Err("the incoming data was not square: {}".into());
     }
-    let mut new_shape:Vec<Vec<&str>> = vec![vec![""; col_count]; row_count];
+    let mut new_shape:Vec<Vec<&str>> = vec![vec![""; row_count]; col_count];
 
     //Flip them over into the new vecs
     for row_idx in 0..(&values).len() {
@@ -60,8 +62,6 @@ pub fn parse_input(input:&str) -> Result<Vec<MathProblem>, Box<dyn Error>> {
             new_shape[col_idx][row_idx] = values[row_idx][col_idx];
         }
     }
-    
-    //println!("new_shape: {:?}", new_shape);
 
     //Now construct the domain objects
     let mut results:Vec<MathProblem> = Vec::with_capacity(new_shape.len());
@@ -89,14 +89,19 @@ pub fn parse_input(input:&str) -> Result<Vec<MathProblem>, Box<dyn Error>> {
     Ok( results )
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>>{
+    let mut f = File::open("input.txt")?;
+    let mut contents = String::new();
+    f.read_to_string(&mut contents)?;
 
+    let probs = parse_input(&contents)?;
+    let total:i64 = probs.par_iter().map(|p| p.calculate().expect("missing content for a problem?")).sum();
+    println!("Grand total for {} input problems is {}", probs.len(), total);
+    Ok( () )
 }
 
 #[cfg(test)]
 mod test {
-    use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
-
     use super::*;
 
     #[test]
