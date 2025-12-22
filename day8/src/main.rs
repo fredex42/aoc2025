@@ -268,11 +268,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         return Err("there were insufficient boxes to complete the task".into());
     }
 
-    //Connect closest 1,000 pairs
-    for i in 0..1000 {
+    //Connect until all the boxes are joined
+    let mut i = 0;
+    while circuits.disconnected_boxes().len() > 0 {
         circuits.connect_pair(&pairs[i]);
+        i+=1;
     }
-
+    i-=1;   //we added one before checking if we were at the end
+    println!("All boxes joined after {} iterations.  The last pair joined were {} -> {}", i, pairs[i].box_one.coord(), pairs[i].box_two.coord());
+    println!("Product of the X co-oridnates of the last pair is {}", pairs[i].box_one.x * pairs[i].box_two.x);
+    
     println!("There were {} connected circuits and {} loose boxes", circuits.all_circuits().count(), circuits.disconnected_boxes().len());
     
     //Debug - show the contents of the 10 largest
