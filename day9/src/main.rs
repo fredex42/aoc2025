@@ -1,4 +1,5 @@
 use std::error::Error;
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -69,20 +70,23 @@ impl Ord for TilePair<'_> {
 }
 
 pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
-    let mut result:Vec<TilePair> = Vec::new();
-    let top = tiles.len();
-    for i in 0..top {
-        match tiles[i..top].split_first() {
-            Some((tile_a, others))=>{
-                others.iter().for_each(|tile_b| {
-                    let t = TilePair::new(tile_a, tile_b);
-                    result.push(t);
-                });
-            },
-            None=> { }
-        }
-    }
-    result
+    let top:usize = tiles.len();
+
+    (0_usize..top).into_par_iter()
+        .flat_map(|i| {
+            match tiles[i..top].split_first() {
+                Some((tile_a, others))=>{
+                    others.iter().map(|tile_b| {
+                        TilePair::new(tile_a, tile_b)
+                    }).collect()
+                },
+                None=>{
+                    panic!("improperly configured tile list, this should not happen");
+                    vec![]
+                }
+            }
+        })
+        .collect()
 }
 
 pub fn parse_input(input:&str) -> Result<Vec<Tile>, Box<dyn Error>> {
