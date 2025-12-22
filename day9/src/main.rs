@@ -1,4 +1,4 @@
-use std::error::Error;
+use std::{error::Error, fs::File, io::Read};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 
@@ -97,6 +97,18 @@ pub fn parse_input(input:&str) -> Result<Vec<Tile>, Box<dyn Error>> {
 }
 
 fn main() ->Result<(), Box<dyn Error>> {
+    let mut f = File::open("input.txt")?;
+    let mut content = String::new();
+    f.read_to_string(&mut content)?;
+
+    let tiles = parse_input(&content)?;
+    let mut pairs = pair_up(&tiles);
+    pairs.sort();
+
+    match pairs.last() {
+        Some(last_pair)=>println!("The largest area is {}", last_pair.area_of_rectangle()),
+        None=>println!("ERROR! The list of pairs was empty :-/")
+    }
     Ok( () )
 }
 
