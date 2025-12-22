@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, error::Error, hash::RandomState, num::ParseIntError};
+use std::{collections::{HashMap, HashSet}, error::Error, fs::File, hash::RandomState, io::Read, num::ParseIntError};
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -137,15 +137,16 @@ impl Circuits {
         self.all_circuits().count()
     }
 
-    pub fn connect_pair(&mut self, pair:&JunctionBoxPair) -> Uuid {
+    pub fn connect_pair(&mut self, pair:&JunctionBoxPair) -> Option<Uuid> {
         self.connect(pair.box_one, pair.box_two)
     }
 
     /**
-     * Associates the two boxes given to a circuit and returns the ID of that circuit
+     * Associates the two boxes given to a circuit and returns the ID of that circuit.
+     * Returns the id of the circuit, or None if they were already joined
      */
-    pub fn connect(&mut self, box_a:&JunctionBox, box_b:&JunctionBox) -> Uuid {
-        println!("Connecting {} -> {}", box_a.coord(), box_b.coord());
+    pub fn connect(&mut self, box_a:&JunctionBox, box_b:&JunctionBox) -> Option<Uuid> {
+        // {} -> {}", box_a.coord(), box_b.coord());
         match (self.circuit_for(box_a), self.circuit_for(box_b)) {
             (None, None)=>{
                 //Neither box is in a circuit; create a new circuit ID and associate them
@@ -165,7 +166,7 @@ impl Circuits {
                         self.circuit_memberships.insert(c_id, m);
                     }
                 };
-                c_id
+                Some(c_id)
             },
             (Some(c_id), None)=>{
                 //We are joining a new box onto an existing circuit
@@ -180,7 +181,7 @@ impl Circuits {
                         self.circuit_memberships.insert(c_id, m);
                     }
                 };
-                c_id
+                Some(c_id)
             },
             (None, Some(c_id))=>{
                 //We are joining a new box onto an existing circuit
@@ -195,11 +196,11 @@ impl Circuits {
                         self.circuit_memberships.insert(c_id, m);
                     }
                 };
-                c_id
+                Some(c_id)
             },
             (Some(circuit_a), Some(circuit_b))=>{
                 if circuit_a==circuit_b {   //if they are already part of the same circuit, then we don't need to join again
-                    return  circuit_a;
+                    return None;
                 }
                 //Both boxes are members of different circuits; we must merge the circuits by removing one and moving all
                 //its contents to the other
@@ -218,7 +219,7 @@ impl Circuits {
                     },
                     None=>panic!("when merging there should already be memberships in circuit b!")
                 }
-                circuit_a
+                Some(circuit_a)
             }
         }
     }
@@ -251,6 +252,66 @@ pub fn pair_up<'a> (boxes:&'a Vec<JunctionBox>) -> Vec<JunctionBoxPair<'a>> {
 }
 
 fn main() -> Result<(), Box<dyn Error>> {
+    let mut f = File::open("input.txt")?;
+    let mut content = String::new();
+    f.read_to_string(&mut content)?;
+
+    let boxes = parse_input(&content)?;
+    println!("Parsed in {} boxes", boxes.len());
+    let mut pairs = pair_up(&boxes);
+    pairs.sort();
+    // pairs.iter().take(10).enumerate().for_each(|(i, p)| println!("{}: {}", i, p.distance()));
+    let mut circuits = Circuits::new(&boxes);
+
+    println!("There are a total of {} pairs", pairs.len());
+    if pairs.len() < 1000 {
+        return Err("there were insufficient boxes to complete the task".into());
+    }
+
+    //Connect closest 1,000 pairs
+    for i in 0..1000 {
+        circuits.connect_pair(&pairs[i]);
+    }
+
+    //Perform 1000 successful connections
+    // let mut connected = 0;
+    // let mut n = 0;
+
+    // loop {
+    //     match circuits.connect_pair(&pairs[n]) {
+    //         Some(_)=>connected+=1,
+    //         None=> { }
+    //     }
+    //     n+=1;
+    //     if n>=pairs.len() {
+    //         println!("ERROR - ran out of pairs after {} connections", connected);
+    //         break;
+    //     }
+    //     if connected>=1000 {
+    //         break;
+    //     }
+    // }
+
+    println!("There were {} connected circuits and {} loose boxes", circuits.all_circuits().count(), circuits.disconnected_boxes().len());
+    
+    //Debug - show the contents of the 10 largest
+    // circuits.sorted_circuits().iter().rev().take(10).enumerate().for_each(|(i, c)| {
+    //     let coords:Vec<String> = c.iter().filter_map(|id| circuits.all_boxes.get(id).map(|bx| bx.coord())).collect();
+    //     let desc_str = coords.join(";");
+    //     println!("{} (size {}): {}", i, c.len(), desc_str);
+    // });
+    //Calculate the size of the three largest circuits multiplied together
+    let three_largest = circuits.sorted_circuits().iter()
+        .rev()
+        .take(3)
+        .map(|c| c.len())
+        .reduce(|total, size| total*size);
+    
+    match three_largest {
+        Some(size)=>println!("The product of the size of the three largest circuits was {}", size),
+        None=>println!("There were not enough circuits to take the product")
+    }
+    
     Ok( () )
 }
 
@@ -347,6 +408,13 @@ mod test {
         assert_eq!(circuits.disconnected_boxes().len(), 7);
         let circuit_sizes_sorted:Vec<usize> = circuits.sorted_circuits().iter().map(|c| c.iter().count()).collect();
         assert_eq!(circuit_sizes_sorted, vec![2,2,4,5]);
+
+        let final_product = circuits.sorted_circuits().iter().rev()
+            .take(3)
+            .map(|c| c.len())
+            .reduce(|total, size| total*size);
+
+        assert_eq!(final_product, Some(40));
     }
 
     #[test]
@@ -420,5 +488,32 @@ mod test {
         assert!(content.contains(&box_b.unique_id));
         assert!(content.contains(&box_c.unique_id));
         assert!(content.contains(&box_d.unique_id));
+    }
+
+    #[test]
+    fn test_connect_existing_both_same() {
+        let box_a = JunctionBox::from_string("1,2,3").unwrap();
+        let box_b = JunctionBox::from_string("4,5,6").unwrap();
+        let box_c = JunctionBox::from_string("7,8,9").unwrap();
+        let box_d = JunctionBox::from_string("0,1,2").unwrap();
+        
+        let mut c = Circuits::new(&vec![box_a, box_b, box_c, box_d]);
+        c.connect(&box_a, &box_b);
+        c.connect(&box_c, &box_d);
+        assert_eq!(c.count(), 2);
+
+        c.connect(&box_d, &box_c);
+        assert_eq!(c.count(), 2);
+        let c_id = c.circuit_for(&box_a).unwrap();
+        let content = c.circuit_memberships.get(&c_id).unwrap();
+        assert!(content.contains(&box_a.unique_id));
+        assert!(content.contains(&box_b.unique_id));
+        assert_eq!(content.len(), 2);
+
+        let c_id = c.circuit_for(&box_c).unwrap();
+        let content = c.circuit_memberships.get(&c_id).unwrap();
+        assert!(content.contains(&box_c.unique_id));
+        assert!(content.contains(&box_d.unique_id));
+        assert_eq!(content.len(), 2);
     }
 }

@@ -100,6 +100,7 @@ version = "0.1.0"
 name = "day8"
 version = "0.1.0"
 dependencies = [
+ "rayon",
  "uuid",
 ]
 
