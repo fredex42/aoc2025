@@ -3,13 +3,13 @@ use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct JunctionBox {
-    x: u32,
-    y: u32,
-    z: u32,
+    x: u64,
+    y: u64,
+    z: u64,
     unique_id: Uuid 
 }
 
-fn modulus_subtract(op_a: u32, op_b: u32)->u32 {
+fn modulus_subtract(op_a: u64, op_b: u64)->u64 {
     if op_a>op_b {
         op_a - op_b
     } else {
@@ -22,7 +22,7 @@ impl JunctionBox {
      * Creates a new JunctionBox from a string of x,y,z co-ordinates
      */
     pub fn from_string(input: &str) -> Result<JunctionBox, Box<dyn Error>> {
-        let coords_res:Result<Vec<u32>, ParseIntError> = input.split(",").map(|num| num.parse::<u32>()).collect();
+        let coords_res:Result<Vec<u64>, ParseIntError> = input.split(",").map(|num| num.parse::<u64>()).collect();
         
         coords_res.map_err(|e| e.into()).map(|coords| if coords.len()==3 {
             Ok(JunctionBox { x: coords[0], y: coords[1], z: coords[2], unique_id: Uuid::new_v4() })
@@ -273,25 +273,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         circuits.connect_pair(&pairs[i]);
     }
 
-    //Perform 1000 successful connections
-    // let mut connected = 0;
-    // let mut n = 0;
-
-    // loop {
-    //     match circuits.connect_pair(&pairs[n]) {
-    //         Some(_)=>connected+=1,
-    //         None=> { }
-    //     }
-    //     n+=1;
-    //     if n>=pairs.len() {
-    //         println!("ERROR - ran out of pairs after {} connections", connected);
-    //         break;
-    //     }
-    //     if connected>=1000 {
-    //         break;
-    //     }
-    // }
-
     println!("There were {} connected circuits and {} loose boxes", circuits.all_circuits().count(), circuits.disconnected_boxes().len());
     
     //Debug - show the contents of the 10 largest
@@ -515,5 +496,13 @@ mod test {
         assert!(content.contains(&box_c.unique_id));
         assert!(content.contains(&box_d.unique_id));
         assert_eq!(content.len(), 2);
+    }
+
+    #[test]
+    fn test_distance() {
+        let box_a = JunctionBox::from_string("0,0,0").unwrap();
+        let box_b = JunctionBox::from_string("90000,0,0").unwrap();
+        let dist = box_b.distance(&box_a);
+        assert_eq!(dist, 90000.0);
     }
 }
