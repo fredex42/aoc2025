@@ -40,7 +40,7 @@ impl TilePair<'_> {
             //We want the area _bounded by_ the co-ordinates inclusively, i.e. include 1 extra column on the end, 
             //and 1 extra row on the end
             //
-            (self.tile_a.x - self.tile_b.x + 1).abs() * (self.tile_a.y - self.tile_b.y + 1).abs()
+            ((self.tile_a.x - self.tile_b.x).abs()+ 1) * ((self.tile_a.y - self.tile_b.y).abs() + 1)
         ).try_into().expect("there was an integer overflow calculating area")
     }
 
@@ -383,13 +383,23 @@ fn main() ->Result<(), Box<dyn Error>> {
     let tiles = parse_input(&content)?;
     let mut pairs = pair_up(&tiles);
     pairs.sort();
+    pairs.reverse();
 
-    match pairs.last() {
+    match pairs.first() {
         Some(last_pair)=>println!("The largest area is {}", last_pair.area_of_rectangle()),
         None=>println!("ERROR! The list of pairs was empty :-/")
     }
 
-    
+    let permimeter = Perimeter::new(&tiles).expect("Could not join points into a perimeter");
+    let valid_rectangles:Vec<&TilePair> = pairs.iter().filter(|rec| permimeter.rectangle_sits_inside(rec)).collect();
+
+    valid_rectangles.iter().for_each(|rec| {
+        println!("{:?} -> {:?}; {}", rec.tile_a, rec.tile_b, rec.area_of_rectangle());
+    });
+    match valid_rectangles.first() {
+        Some(last_pair)=>println!("The largest rectangle inside the perimeter has an area of {}", last_pair.area_of_rectangle()),
+        None=>println!("ERROR! No rectangles lay within the perimeter :-/")
+    }
     Ok( () )
 }
 
@@ -498,7 +508,7 @@ mod test {
         assert!(!perimeter.sits_inside(&Tile { x: 3, y: 7}));
     }
 
-        #[test]
+    #[test]
     fn test_rectangle_sits_inside() {
         let input = "7,1
 11,1
@@ -522,6 +532,28 @@ mod test {
         assert!(! perimeter.rectangle_sits_inside(&rec3));
         let rec4 = TilePair::new(&Tile { x: 5, y:6 }, &Tile {x: 10, y: 4});
         assert!(! perimeter.rectangle_sits_inside(&rec4));
+    }
+
+    #[test]
+    fn test_example_2() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+        let mut pairs = pair_up(&tiles);
+        let perimeter = Perimeter::new(&tiles).expect("Could not join all points into a perimeter");
+
+        pairs.sort();
+        pairs.reverse();
+        let valid_pairs:Vec<&TilePair> = pairs.iter().filter(|rect| perimeter.rectangle_sits_inside(rect)).collect();
+
+        let result = valid_pairs.first().expect("No rectangles were valid in the perimeter");
+        assert_eq!(result.area_of_rectangle(), 24);
     }
 
     #[test]
