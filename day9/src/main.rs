@@ -1,5 +1,5 @@
 use std::{collections::HashSet, error::Error, fs::File, hash::RandomState, io::Read};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -23,7 +23,7 @@ impl Tile {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct TilePair<'a> {
     tile_a: &'a Tile,
     tile_b: &'a Tile
@@ -42,6 +42,15 @@ impl TilePair<'_> {
             //
             (self.tile_a.x - self.tile_b.x + 1).abs() * (self.tile_a.y - self.tile_b.y + 1).abs()
         ).try_into().expect("there was an integer overflow calculating area")
+    }
+
+    pub fn corners_of_rectangle(&self) -> Vec<Tile> {
+        vec![
+            Tile { x: self.tile_a.x, y: self.tile_b.y},
+            Tile { x: self.tile_a.x, y: self.tile_a.y},
+            Tile { x: self.tile_b.x, y: self.tile_a.y},
+            Tile { x: self.tile_b.x, y: self.tile_b.y}
+        ]
     }
 }
 
@@ -115,18 +124,34 @@ pub struct Edge<'a> {
 }
 
 impl Edge<'_> {
-    /**
-     * Checks if a given point lies within the polygon defined by this vector.
-     * This assumes that the polygon was constructed in a clockwise-following manner;
-     * if it was anti-clockwise then the test must be reversed
-     */
-    pub fn is_inside(&self, point: &Tile) -> bool {
-        match self.direction {
-            Direction::LR=>point.y >= self.start.y,
-            Direction::RL=>point.y <= self.start.y,
-            Direction::TB=>point.x <= self.start.x,
-            Direction::BT=>point.x >= self.start.x
-        }
+    // /**
+    //  * Checks if a given point lies within the polygon defined by this vector.
+    //  * This assumes that the polygon was constructed in a clockwise-following manner;
+    //  * if it was anti-clockwise then the test must be reversed
+    //  */
+    // pub fn is_inside(&self, point: &Tile) -> bool {
+    //     println!("checking {:?} against {:?}", point, self);
+
+    //     match self.direction {
+    //         Direction::LR=>point.y >= self.start.y,
+    //         Direction::RL=>point.y <= self.start.y,
+    //         Direction::TB=>point.x <= self.start.x,
+    //         Direction::BT=>point.x >= self.start.x
+    //     }
+    // }
+
+    pub fn x_in_range(&self, point: &Tile) -> bool {
+        let min_x = self.start.x.min(self.end.x);
+        let max_x = self.start.x.max(self.end.x);
+
+        point.x >= min_x && point.x <= max_x
+    }
+
+    pub fn y_in_range(&self, point: &Tile) -> bool {
+        let min_y = self.start.y.min(self.end.y);
+        let max_y = self.start.y.max(self.end.y);
+
+        point.y >= min_y && point.y <= max_y
     }
 }
 
@@ -252,6 +277,21 @@ impl Perimeter<'_> {
     }
 
     /**
+     * Checks if the given point is inside the polygon
+     */
+    pub fn sits_inside(&self, point: &Tile) -> bool {
+        // A point is inside if we can hit at least one edge in every direction from where we are
+        self.edges.iter().any(|edge| edge.direction==Direction::LR && point.y >= edge.start.y && edge.x_in_range(point)) &&
+            self.edges.iter().any(|edge| edge.direction==Direction::RL && point.y <= edge.start.y && edge.x_in_range(point)) &&
+            self.edges.iter().any(|edge| edge.direction==Direction::TB && point.x <= edge.start.x && edge.y_in_range(point)) &&
+            self.edges.iter().any(|edge| edge.direction==Direction::BT && point.x >= edge.start.x && edge.y_in_range(point))
+    }
+
+    pub fn rectangle_sits_inside(&self, pair: &TilePair) -> bool {
+        pair.corners_of_rectangle().par_iter().all(|corner| self.sits_inside(corner))
+    }
+
+    /**
      * Constructs a perimeter from the given control points
      */
     pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter<'a>> {
@@ -272,7 +312,7 @@ impl Perimeter<'_> {
         while ! cp_set.is_empty() {
             match Self::next_controlpoint(current, &cp_set, current_direction) {
                 Some(tile)=>{
-                    println!("Found {:?} following {:?} going {:?}", tile, current, current_direction);
+                    //println!("Found {:?} following {:?} going {:?}", tile, current, current_direction);
                     //Great, we found a control point.
                     let next_edge = Edge { start: current, end: tile, direction: current_direction };
                     edges.push(next_edge);
@@ -288,7 +328,7 @@ impl Perimeter<'_> {
                     current_direction = current_direction.turn();
                 },
                 None=>{
-                    println!("Nothing found for {:?} going {:?}. Starting direction was {:?}", current, current_direction, starting_direction);
+                    //println!("Nothing found for {:?} going {:?}. Starting direction was {:?}", current, current_direction, starting_direction);
 
                     current_direction = current_direction.turn();
                     if current_direction==starting_direction {
@@ -348,6 +388,8 @@ fn main() ->Result<(), Box<dyn Error>> {
         Some(last_pair)=>println!("The largest area is {}", last_pair.area_of_rectangle()),
         None=>println!("ERROR! The list of pairs was empty :-/")
     }
+
+    
     Ok( () )
 }
 
@@ -433,7 +475,53 @@ mod test {
         assert_eq!(perimeter.edges[5], Edge { start: &Tile { x: 2, y: 5}, end: &Tile { x: 2, y: 3}, direction: Direction::BT});
         assert_eq!(perimeter.edges[6], Edge { start: &Tile { x: 2, y: 3 }, end: &Tile { x: 7, y: 3}, direction: Direction::LR});
         assert_eq!(perimeter.edges[7], Edge { start: &Tile { x: 7, y: 3}, end: &Tile { x: 7, y: 1}, direction: Direction::BT});
-        
+    }
+
+    #[test]
+    fn test_sits_inside() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+
+        let perimeter = Perimeter::new(&tiles);
+        assert!(perimeter.is_some());
+        let perimeter = perimeter.unwrap();
+        assert!(perimeter.sits_inside(&Tile { x: 4, y: 4}));
+        assert!(perimeter.sits_inside(&Tile { x: 10, y: 5}));
+        assert!(!perimeter.sits_inside(&Tile { x: 0, y: 0}));
+        assert!(!perimeter.sits_inside(&Tile { x: 3, y: 7}));
+    }
+
+        #[test]
+    fn test_rectangle_sits_inside() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+
+        let perimeter = Perimeter::new(&tiles);
+        assert!(perimeter.is_some());
+        let perimeter = perimeter.unwrap();
+
+        let rec1 = TilePair::new(&Tile { x: 7, y:3 }, &Tile {x: 11, y: 1});
+        assert!(perimeter.rectangle_sits_inside(&rec1));
+        let rec2 = TilePair::new(&Tile { x: 9, y:7 }, &Tile {x: 9, y: 5});
+        assert!(perimeter.rectangle_sits_inside(&rec2));
+        let rec3 = TilePair::new(&Tile { x: 2, y:1 }, &Tile {x: 6, y: 4});
+        assert!(! perimeter.rectangle_sits_inside(&rec3));
+        let rec4 = TilePair::new(&Tile { x: 5, y:6 }, &Tile {x: 10, y: 4});
+        assert!(! perimeter.rectangle_sits_inside(&rec4));
     }
 
     #[test]
