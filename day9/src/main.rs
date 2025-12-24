@@ -1,8 +1,8 @@
-use std::{error::Error, fs::File, io::Read};
-use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
+use std::{collections::HashSet, error::Error, fs::File, hash::RandomState, io::Read};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use regex::Regex;
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub struct Tile {
     x: i64,
     y: i64
@@ -66,6 +66,245 @@ impl Ord for TilePair<'_> {
         } else {
             std::cmp::Ordering::Equal
         }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Direction {
+    LR, //Left->Right
+    RL, //Right-Left
+    TB, //Top-Bottom
+    BT  //Bottom-top
+}
+
+impl Direction {
+    /**
+     * "Turns" the direction 90 degrees clockwise and returns the new direction
+     */
+    pub fn turn(&self) -> Self {
+        match self {
+            Self::LR=>Self::TB,
+            Self::TB=>Self::RL,
+            Self::RL=>Self::BT,
+            Self::BT=>Self::LR
+        }
+    }
+
+    /**
+     * Returns true if this direction is the exact inverse of the one given
+     */
+    pub fn is_inverse(&self, other:&Direction) -> bool {
+        match self {
+            Self::LR=>*other==Self::RL,
+            Self::TB=>*other==Self::BT,
+            Self::RL=>*other==Self::LR,
+            Self::BT=>*other==Self::TB
+        }
+    }
+}
+
+/**
+ * Edge defines a vector that makes up a permimeter - including a direction, so we can 
+ * determine "inside" and "outside"
+ */
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Edge<'a> {
+    start: &'a Tile,
+    end: &'a Tile,
+    direction: Direction
+}
+
+impl Edge<'_> {
+    /**
+     * Checks if a given point lies within the polygon defined by this vector.
+     * This assumes that the polygon was constructed in a clockwise-following manner;
+     * if it was anti-clockwise then the test must be reversed
+     */
+    pub fn is_inside(&self, point: &Tile) -> bool {
+        match self.direction {
+            Direction::LR=>point.y >= self.start.y,
+            Direction::RL=>point.y <= self.start.y,
+            Direction::TB=>point.x <= self.start.x,
+            Direction::BT=>point.x >= self.start.x
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct Perimeter<'a> {
+    edges: Vec<Edge<'a>>
+}
+
+impl Perimeter<'_> {
+    //Note, the set _must not be empty_ otherwise this will panic
+    fn find_topleft<'a>(set: &'a Vec<Tile>) -> &'a Tile {
+        let mut min:&'a Tile;
+
+        match set.split_first() {
+            Some((first, others))=>{
+                min = first;
+
+                for tile in others {
+                    if tile.x <= min.x && tile.y <= min.y {
+                        min = tile;
+                    }
+                }
+            },
+            None=>panic!("cannot find topleft with an empty set")
+        }
+
+        min
+    }
+
+    fn next_controlpoint<'a, 'b>(current:&'a Tile, set:&'b HashSet<&'a Tile>, direction:Direction) -> Option<&'a Tile> {
+        match direction {
+            Direction::LR=>{
+                //If traversing left-right we can only move to another point on the same row (y)
+                let candidates:Vec<&&Tile> = set.iter().filter(|tile| tile.y==current.y).collect();
+
+                //Find any points to the right
+                let mut ordered_candidates:Vec<(i64, &&Tile)> = candidates.into_iter()
+                    .filter_map(|point| {
+                        let dist = point.x - current.x; //we are looking for points to the right, i.e. in increasing x
+                        if dist>0 {
+                            Some((dist, point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                
+                //Order by distance
+                ordered_candidates.sort_by(|(dist_a, _), (dist_b, _)| {
+                    dist_a.cmp(dist_b)
+                });
+
+                //Take the first
+                ordered_candidates.first().map(|(_, tile)| &***tile)
+            },
+            Direction::RL=>{
+                //If traversing right-left we can only move to another point on the same row (y)
+                let candidates:Vec<&&Tile> = set.iter().filter(|tile| tile.y==current.y).collect();
+
+                //Find any points to the right
+                let mut ordered_candidates:Vec<(i64, &&Tile)> = candidates.into_iter()
+                    .filter_map(|point| {
+                        let dist = current.x-point.x; //we are looking for points to the left, i.e. in decreasing x
+                        if dist>0 {
+                            Some((dist, point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                
+                //Order by distance
+                ordered_candidates.sort_by(|(dist_a, _), (dist_b, _)| {
+                    dist_a.cmp(dist_b)
+                });
+
+                //Take the first
+                ordered_candidates.first().map(|(_, tile)| &***tile)
+            },
+            Direction::TB=>{
+                //If traversing top-bottom we can only move to another point on the same column(x)
+                let candidates:Vec<&&Tile> = set.iter().filter(|tile| tile.x==current.x).collect();
+
+                let mut ordered_candidates:Vec<(i64, &&Tile)> = candidates.into_iter()
+                    .filter_map(|point| {
+                        let dist = point.y - current.y; //we are looking for points below, i.e. in increasing y
+                        if dist > 0 {
+                            Some((dist, point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                ordered_candidates.sort_by(|(dist_a, _), (dist_b, _)| {
+                    dist_a.cmp(dist_b)
+                });
+
+                ordered_candidates.first().map(|(_, tile)| &***tile)
+            },
+            Direction::BT=>{
+                //If traversing bottom-top we can only move to another point on the same column(x)
+                let candidates:Vec<&&Tile> = set.iter().filter(|tile| tile.x==current.x).collect();
+
+                let mut ordered_candidates:Vec<(i64, &&Tile)> = candidates.into_iter()
+                    .filter_map(|point| {
+                        let dist = current.y - point.y; //we are looking for points above, i.e. in decreasing y
+                        if dist > 0 {
+                            Some((dist, point))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                ordered_candidates.sort_by(|(dist_a, _), (dist_b, _)| {
+                    dist_a.cmp(dist_b)
+                });
+
+                ordered_candidates.first().map(|(_, tile)| &***tile)
+            }
+        }
+    }
+
+    /**
+     * Constructs a perimeter from the given control points
+     */
+    pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter<'a>> {
+        let mut edges: Vec<Edge> = vec![];
+
+        let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
+        if cp_set.is_empty() {
+            return None
+        }
+
+        //Find the top-left of the incoming control points
+        let start_point = Self::find_topleft(control_points);
+        //Don't remove the initial controlpoint from the set. It should be the last one we come to.
+        let mut current = start_point;
+
+        let mut current_direction = Direction::LR;  //start going left-right
+        let mut starting_direction = current_direction;
+        while ! cp_set.is_empty() {
+            match Self::next_controlpoint(current, &cp_set, current_direction) {
+                Some(tile)=>{
+                    println!("Found {:?} following {:?} going {:?}", tile, current, current_direction);
+                    //Great, we found a control point.
+                    let next_edge = Edge { start: current, end: tile, direction: current_direction };
+                    edges.push(next_edge);
+                    //If we got back to where we started, we have a perimeter!
+                    if tile == start_point {
+                        break;
+                    }
+                    //Remove this now connected control point from the set and iterate to find the next one
+                    cp_set.remove(tile);
+                    current = tile;
+                    starting_direction = current_direction;
+                    //Look for another control point 90 degrees further around the circle
+                    current_direction = current_direction.turn();
+                },
+                None=>{
+                    println!("Nothing found for {:?} going {:?}. Starting direction was {:?}", current, current_direction, starting_direction);
+
+                    current_direction = current_direction.turn();
+                    if current_direction==starting_direction {
+                        //We went through 360 degrees without finding any control point to link to.
+                        //Crucially we did check if there was another point on the same line
+                        println!("ERROR! Ran out of valid control points after {:?}", current);
+                        return None
+                    } else if current_direction.is_inverse(&starting_direction) {
+                        //Don't traverse back the way we came otherwise we get stuck in a loop. Nudge on to the next possible direction
+                        current_direction = current_direction.turn();
+                    }
+                }
+            }
+        }
+
+        Some(Perimeter { edges })
     }
 }
 
@@ -134,5 +373,72 @@ mod test {
             println!("({}, {}) -> ({}, {}): area {}", p.tile_a.x, p.tile_a.y, p.tile_b.x, p.tile_b.y, p.area_of_rectangle())
         });
         assert_eq!(pairs.last().unwrap().area_of_rectangle(), 50);
+    }
+
+    #[test]
+    fn test_find_topleft() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+
+        let topleft = Perimeter::find_topleft(&tiles);
+        assert_eq!(topleft, &Tile{ x:7, y:1 });
+    }
+
+    #[test]
+    fn test_next_controlpoint() {
+        let input = "11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+        let tile_set: HashSet<&Tile, RandomState> = HashSet::from_iter(tiles.iter());
+
+        let next = Perimeter::next_controlpoint(&Tile{ x:7, y:1}, &tile_set, Direction::LR);
+        assert!(next.is_some());
+        let next_tile = next.unwrap();
+        assert_eq!(next_tile, &Tile { x:11, y: 1});
+    }
+
+    #[test]
+    fn test_perimeter() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+
+        let perimeter = Perimeter::new(&tiles);
+        assert!(perimeter.is_some());
+        let perimeter = perimeter.unwrap();
+        assert_eq!(perimeter.edges.len(), 8);
+        assert_eq!(perimeter.edges[0], Edge { start: &Tile { x: 7, y: 1 }, end: &Tile { x: 11, y: 1}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[1], Edge { start: &Tile { x: 11, y: 1}, end: &Tile { x: 11, y: 7}, direction: Direction::TB});
+        assert_eq!(perimeter.edges[2], Edge { start: &Tile { x: 11, y: 7 }, end: &Tile { x: 9, y: 7}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[3], Edge { start: &Tile { x: 9, y: 7}, end: &Tile { x: 9, y: 5}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[4], Edge { start: &Tile { x: 9, y: 5 }, end: &Tile { x:2, y: 5}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[5], Edge { start: &Tile { x: 2, y: 5}, end: &Tile { x: 2, y: 3}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[6], Edge { start: &Tile { x: 2, y: 3 }, end: &Tile { x: 7, y: 3}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[7], Edge { start: &Tile { x: 7, y: 3}, end: &Tile { x: 7, y: 1}, direction: Direction::BT});
+        
+    }
+
+    #[test]
+    fn test_direction_eq() {
+        assert!(Direction::LR==Direction::LR);
+        assert!(! (Direction::RL==Direction::LR));
     }
 }
