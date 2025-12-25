@@ -140,6 +140,7 @@ impl Edge<'_> {
     //     }
     // }
 
+    //When ray-casting, the interval must be half-open otherwise we can double count
     pub fn x_in_range(&self, point: &Tile) -> bool {
         let min_x = self.start.x.min(self.end.x);
         let max_x = self.start.x.max(self.end.x);
@@ -282,38 +283,37 @@ impl Perimeter<'_> {
      * Checks if the given point is inside the polygon
      */
     pub fn sits_inside(&self, point: &Tile) -> bool {
-        // Implement a "ray casting" algorithm.  If we can hit an odd number of edges on the way to the edge, in every direction,
-        // then we must be inside the polygon
-        let mut up_crossings = 0;
-        let mut down_crossings = 0;
-        let mut left_crossings = 0;
-        let mut right_crossings = 0;
+        let mut crossings = 0;
+        let mut on_edge = false;
 
-        for e in &self.edges {
-            match e.direction {
-                Direction::LR=>if e.x_in_range(point) && e.start.y <= point.y {
-                    println!("{:?} - crosses {:?}", point, e);
-                    up_crossings +=1
-                },
-                Direction::RL=>if e.x_in_range(point) && e.start.y >=point.y {
-                    println!("{:?} - crosses {:?}", point, e);
-                    down_crossings +=1
-                },
-                Direction::BT=>{
-                    if e.y_in_range(point) && e.start.x <= point.x {
-                        println!("{:?} - crosses {:?}", point, e);
-                        left_crossings +=1
-                    }}
-                ,
-                Direction::TB=>{
-                    if e.y_in_range(point) && e.start.x >= point.x {
-                        println!("{:?} - crosses {:?}", point, e);
-                        right_crossings +=1
-                    }
-                }
+        //We project an imaginary "ray" to the right.  This means we are only measuring intersections with the _vertical_ edges and
+        //can exclude _horizontal_ edges
+        for edge in self.edges.iter().filter(|edge| edge.direction==Direction::TB || edge.direction==Direction::BT) {
+            let (x1, y1) = (edge.start.x as f64, edge.start.y as f64);
+            let (x2, y2) = (edge.end.x as f64, edge.end.y as f64);
+
+            // // Check if the horizontal ray intersects this edge.  This does not handle the case where the point is _on_ the edge.
+            // let intersects = (edge.start.y > point.y) != (edge.end.y > point.y) //y coord of point must lie in the edge so ray intersects
+            //     && (point.x as f64) < (x2 - x1) * (point.y as f64 - y1) / (y2 - y1) + x1;   //x coord of point must be less than the intersection point. 
+            //                                                                 //Calculate intersection point by solving parametric co-ordinates of the ray
+
+            // if intersects {
+            //     crossings += 1;
+            // }
+            
+            //The case where point.x==edge.start.x is explicitly handled below
+            if point.x < edge.start.x && ((edge.start.y <= point.y && edge.end.y > point.y) || (edge.end.y <= point.y && edge.start.y > point.y)) {   //edge.start.x === edge.end.x as the direction is vertical
+                crossings += 1
+            }
+
+            //We lie on the edge, if P is between start and end, AND it lies on a straight line between the two
+            //The second of those conditions is determined by the area of the related triangle being 0, but is implicit if the edges are axis aligned
+            if edge.x_in_range(point) && edge.y_in_range(point) {
+                on_edge = true
             }
         }
-        up_crossings % 2 == 1 && down_crossings %2 == 1 && left_crossings % 2 == 1 && right_crossings % 2 == 1
+
+        crossings % 2 == 1 || on_edge
     }
 
     pub fn rectangle_sits_inside(&self, pair: &TilePair) -> bool {
