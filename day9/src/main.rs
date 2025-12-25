@@ -157,7 +157,9 @@ impl Edge<'_> {
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Perimeter<'a> {
-    edges: Vec<Edge<'a>>
+    edges: Vec<Edge<'a>>,
+    x_max: i64,
+    y_max: i64
 }
 
 impl Perimeter<'_> {
@@ -280,11 +282,38 @@ impl Perimeter<'_> {
      * Checks if the given point is inside the polygon
      */
     pub fn sits_inside(&self, point: &Tile) -> bool {
-        // A point is inside if we can hit at least one edge in every direction from where we are
-        self.edges.iter().any(|edge| edge.direction==Direction::LR && point.y >= edge.start.y && edge.x_in_range(point)) &&
-            self.edges.iter().any(|edge| edge.direction==Direction::RL && point.y <= edge.start.y && edge.x_in_range(point)) &&
-            self.edges.iter().any(|edge| edge.direction==Direction::TB && point.x <= edge.start.x && edge.y_in_range(point)) &&
-            self.edges.iter().any(|edge| edge.direction==Direction::BT && point.x >= edge.start.x && edge.y_in_range(point))
+        // Implement a "ray casting" algorithm.  If we can hit an odd number of edges on the way to the edge, in every direction,
+        // then we must be inside the polygon
+        let mut up_crossings = 0;
+        let mut down_crossings = 0;
+        let mut left_crossings = 0;
+        let mut right_crossings = 0;
+
+        for e in &self.edges {
+            match e.direction {
+                Direction::LR=>if e.x_in_range(point) && e.start.y <= point.y {
+                    println!("{:?} - crosses {:?}", point, e);
+                    up_crossings +=1
+                },
+                Direction::RL=>if e.x_in_range(point) && e.start.y >=point.y {
+                    println!("{:?} - crosses {:?}", point, e);
+                    down_crossings +=1
+                },
+                Direction::BT=>{
+                    if e.y_in_range(point) && e.start.x <= point.x {
+                        println!("{:?} - crosses {:?}", point, e);
+                        left_crossings +=1
+                    }}
+                ,
+                Direction::TB=>{
+                    if e.y_in_range(point) && e.start.x >= point.x {
+                        println!("{:?} - crosses {:?}", point, e);
+                        right_crossings +=1
+                    }
+                }
+            }
+        }
+        up_crossings % 2 == 1 && down_crossings %2 == 1 && left_crossings % 2 == 1 && right_crossings % 2 == 1
     }
 
     pub fn rectangle_sits_inside(&self, pair: &TilePair) -> bool {
@@ -344,7 +373,9 @@ impl Perimeter<'_> {
             }
         }
 
-        Some(Perimeter { edges })
+        let x_max:i64 = control_points.iter().map(|cp| cp.x).max().unwrap();
+        let y_max:i64 = control_points.iter().map(|cp| cp.y).max().unwrap();
+        Some(Perimeter { edges, x_max, y_max })
     }
 }
 
