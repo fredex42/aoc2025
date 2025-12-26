@@ -1,5 +1,5 @@
 use std::{collections::HashSet, error::Error, fs::File, hash::RandomState, io::Read};
-use rayon::iter::{IntoParallelIterator, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
@@ -24,14 +24,14 @@ impl Tile {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub struct TilePair<'a> {
+pub struct Rectangle<'a> {
     tile_a: &'a Tile,
-    tile_b: &'a Tile
+    tile_b: &'a Tile,
 }
 
-impl TilePair<'_> {
-    pub fn new<'a>(tile_a: &'a Tile, tile_b: &'a Tile) -> TilePair<'a> {
-        TilePair { tile_a, tile_b }
+impl Rectangle<'_> {
+    pub fn new<'a>(tile_a: &'a Tile, tile_b: &'a Tile) -> Rectangle<'a> {
+        Rectangle { tile_a, tile_b }
     }
 
     pub fn area_of_rectangle(&self) -> u64 {
@@ -43,9 +43,32 @@ impl TilePair<'_> {
             (self.tile_a.x - self.tile_b.x + 1).abs() * (self.tile_a.y - self.tile_b.y + 1).abs()
         ).try_into().expect("there was an integer overflow calculating area")
     }
+
+    /**
+     * Returns a list of four edges that define the rectangle
+     */
+    pub fn edges(&self) -> Vec<Edge> {
+        let tl_x = self.tile_a.x.min(self.tile_b.x);
+        let tl_y = self.tile_a.y.min(self.tile_b.y);
+        let tr_x = self.tile_a.x.max(self.tile_b.x);
+        let tr_y = tl_y;    //tops are at the same Y
+        let bl_x = tl_x;    //lefts are at the same X
+        let bl_y = self.tile_a.y.max(self.tile_b.y);
+        let br_x = tr_x;
+        let br_y = bl_y;
+
+        let v = vec![
+            Edge { start: Tile { x: tl_x, y: tl_y }, end: Tile {x: tr_x, y: tr_y}, direction: Direction::LR},
+            Edge { start: Tile { x: tr_x, y: tr_y }, end: Tile {x:br_x, y: br_y}, direction: Direction::TB},
+            Edge { start: Tile { x: br_x, y: br_y }, end: Tile {x: bl_x, y: bl_y }, direction: Direction::RL},
+            Edge { start: Tile { x: bl_x, y: bl_y }, end: Tile {x: tl_x, y: tl_y}, direction: Direction::BT}
+        ];
+        println!("edges: {:?}", v);
+        v
+    }
 }
 
-impl PartialOrd for TilePair<'_> {
+impl PartialOrd for Rectangle<'_> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.area_of_rectangle() < other.area_of_rectangle() {
             Some(std::cmp::Ordering::Less)
@@ -57,7 +80,7 @@ impl PartialOrd for TilePair<'_> {
     }
 }
 
-impl Ord for TilePair<'_> {
+impl Ord for Rectangle<'_> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         if self.area_of_rectangle() < other.area_of_rectangle() {
             std::cmp::Ordering::Less
@@ -108,13 +131,13 @@ impl Direction {
  * determine "inside" and "outside"
  */
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Edge<'a> {
-    start: &'a Tile,
-    end: &'a Tile,
+pub struct Edge {
+    start: Tile,
+    end: Tile,
     direction: Direction
 }
 
-impl Edge<'_> {
+impl Edge {
     /**
      * Checks if a given point lies within the polygon defined by this vector.
      * This assumes that the polygon was constructed in a clockwise-following manner;
@@ -128,14 +151,82 @@ impl Edge<'_> {
             Direction::BT=>point.x >= self.start.x
         }
     }
+
+    /**
+     * Checks if this edge is perpendicular to the other one.
+     * Note, this assumes that the edges are axis-aligned
+     */
+    pub fn is_perpendicular(&self, other: &Edge) -> bool {
+        (self.start.x==self.end.x && other.start.y==other.end.y) ||
+        (self.start.y==self.end.y && other.start.x==other.end.x)
+    }
+
+    /**
+     * Checks if this edge intersects the other edge.  Touching does _not_ count as an intersection.
+     */
+    pub fn intersects(&self, other: &Edge) -> bool {
+        println!("Checking intersection of {:?} with {:?}", self, other );
+        let min_x = self.start.x.min(self.end.x);
+        let min_y = self.start.y.min(self.end.y);
+        let max_x = self.start.x.max(self.end.x);
+        let max_y = self.start.y.max(self.end.y);
+
+        if !self.is_perpendicular(other) {  //2d grid aligned vectors - if not perpendicular we are parallel so never cross
+            false
+        } else {
+            if min_x==max_x && 
+                other.start.x.min(other.end.x) < min_x && 
+                other.end.x.max(other.start.x) > max_x &&
+                min_y < other.start.y.min(other.end.y) &&
+                max_y > other.end.y.max(other.end.x)
+                { //horizontal case so other is vertical
+                println!("horizontal intersection between {}->{} and {}->{}", self.start.y, self.end.y, other.start.y, other.end.y);
+                true
+            } else if min_y==max_y && 
+                other.start.y.min(other.end.y) < min_y && 
+                other.end.y.max(other.end.y) > max_y &&
+                max_x < other.start.x.min(other.end.x) &&
+                min_y > other.end.y.max(other.start.y) { //horizontal case so other is vertical
+                println!("vertical intersection {} {} {} {}", self.start.x, other.start.x, self.end.x, other.end.x);
+                true
+            } else {
+                false
+            }
+        }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Perimeter<'a> {
-    edges: Vec<Edge<'a>>
+pub struct Perimeter {
+    edges: Vec<Edge>
 }
 
-impl Perimeter<'_> {
+impl Perimeter {
+    pub fn is_inside(&self, rect:&Rectangle) -> bool {
+        //A rectangle is inside the perimeter if: (a) no edges of the rectangle intersect the perimeter and (b) a ray cast to the outer axis intersects an odd number of perimeter edges
+
+        //Test a: no edges of the rectangle intersect the perimeter
+        if rect.edges().iter().any(|re| {
+            let v = self.edges.par_iter().any(|pe| pe.intersects(re));
+            println!("{}",v);
+            v
+        }) {
+            println!("at least 1 edge intersected");
+            return false
+        }
+
+        //Test b: a ray cast to the outer axis intersects an odd number of perimeter edges
+        let edge_crossings = self.edges.par_iter()
+            .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
+            .filter(|pe| {
+                pe.start.x > rect.tile_a.x &&
+                    ( rect.tile_a.y.min(rect.tile_b.y) >= pe.start.y ) &&
+                    ( rect.tile_a.y.max(rect.tile_b.y) <= pe.start.y )
+            })
+            .count();
+        edge_crossings % 2 == 1
+    }
+
     //Note, the set _must not be empty_ otherwise this will panic
     fn find_topleft<'a>(set: &'a Vec<Tile>) -> &'a Tile {
         let mut min:&'a Tile;
@@ -254,7 +345,7 @@ impl Perimeter<'_> {
     /**
      * Constructs a perimeter from the given control points
      */
-    pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter<'a>> {
+    pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter> {
         let mut edges: Vec<Edge> = vec![];
 
         let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
@@ -272,9 +363,8 @@ impl Perimeter<'_> {
         while ! cp_set.is_empty() {
             match Self::next_controlpoint(current, &cp_set, current_direction) {
                 Some(tile)=>{
-                    println!("Found {:?} following {:?} going {:?}", tile, current, current_direction);
                     //Great, we found a control point.
-                    let next_edge = Edge { start: current, end: tile, direction: current_direction };
+                    let next_edge = Edge { start: *current, end: *tile, direction: current_direction };
                     edges.push(next_edge);
                     //If we got back to where we started, we have a perimeter!
                     if tile == start_point {
@@ -288,8 +378,6 @@ impl Perimeter<'_> {
                     current_direction = current_direction.turn();
                 },
                 None=>{
-                    println!("Nothing found for {:?} going {:?}. Starting direction was {:?}", current, current_direction, starting_direction);
-
                     current_direction = current_direction.turn();
                     if current_direction==starting_direction {
                         //We went through 360 degrees without finding any control point to link to.
@@ -308,7 +396,7 @@ impl Perimeter<'_> {
     }
 }
 
-pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
+pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<Rectangle<'a>> {
     let top:usize = tiles.len();
 
     (0_usize..top).into_par_iter()
@@ -316,7 +404,7 @@ pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
             match tiles[i..top].split_first() {
                 Some((tile_a, others))=>{
                     others.iter().map(|tile_b| {
-                        TilePair::new(tile_a, tile_b)
+                        Rectangle::new(tile_a, tile_b)
                     }).collect()
                 },
                 None=>{
@@ -425,14 +513,14 @@ mod test {
         assert!(perimeter.is_some());
         let perimeter = perimeter.unwrap();
         assert_eq!(perimeter.edges.len(), 8);
-        assert_eq!(perimeter.edges[0], Edge { start: &Tile { x: 7, y: 1 }, end: &Tile { x: 11, y: 1}, direction: Direction::LR});
-        assert_eq!(perimeter.edges[1], Edge { start: &Tile { x: 11, y: 1}, end: &Tile { x: 11, y: 7}, direction: Direction::TB});
-        assert_eq!(perimeter.edges[2], Edge { start: &Tile { x: 11, y: 7 }, end: &Tile { x: 9, y: 7}, direction: Direction::RL});
-        assert_eq!(perimeter.edges[3], Edge { start: &Tile { x: 9, y: 7}, end: &Tile { x: 9, y: 5}, direction: Direction::BT});
-        assert_eq!(perimeter.edges[4], Edge { start: &Tile { x: 9, y: 5 }, end: &Tile { x:2, y: 5}, direction: Direction::RL});
-        assert_eq!(perimeter.edges[5], Edge { start: &Tile { x: 2, y: 5}, end: &Tile { x: 2, y: 3}, direction: Direction::BT});
-        assert_eq!(perimeter.edges[6], Edge { start: &Tile { x: 2, y: 3 }, end: &Tile { x: 7, y: 3}, direction: Direction::LR});
-        assert_eq!(perimeter.edges[7], Edge { start: &Tile { x: 7, y: 3}, end: &Tile { x: 7, y: 1}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[0], Edge { start: Tile { x: 7, y: 1 }, end: Tile { x: 11, y: 1}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[1], Edge { start: Tile { x: 11, y: 1}, end: Tile { x: 11, y: 7}, direction: Direction::TB});
+        assert_eq!(perimeter.edges[2], Edge { start: Tile { x: 11, y: 7 }, end: Tile { x: 9, y: 7}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[3], Edge { start: Tile { x: 9, y: 7}, end: Tile { x: 9, y: 5}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[4], Edge { start: Tile { x: 9, y: 5 }, end: Tile { x:2, y: 5}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[5], Edge { start: Tile { x: 2, y: 5}, end: Tile { x: 2, y: 3}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[6], Edge { start: Tile { x: 2, y: 3 }, end: Tile { x: 7, y: 3}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[7], Edge { start: Tile { x: 7, y: 3}, end: Tile { x: 7, y: 1}, direction: Direction::BT});
         
     }
 
@@ -440,5 +528,62 @@ mod test {
     fn test_direction_eq() {
         assert!(Direction::LR==Direction::LR);
         assert!(! (Direction::RL==Direction::LR));
+    }
+
+    #[test]
+    fn test_rectangle_edges() {
+        let rect = Rectangle { tile_a: &Tile {x: 1, y:1}, tile_b: &Tile {x: 4, y:4}};
+        let edges = rect.edges();
+
+        assert_eq!(edges.len(), 4);
+        assert_eq!(edges[0], Edge { start: Tile { x: 1, y: 1 }, end: Tile {x: 4, y: 1}, direction: Direction::LR});
+        assert_eq!(edges[1], Edge { start: Tile { x: 4, y: 1 }, end: Tile {x: 4, y: 4}, direction: Direction::TB});
+        assert_eq!(edges[2], Edge { start: Tile { x: 4, y: 4 }, end: Tile {x: 1, y: 4}, direction: Direction::RL});
+        assert_eq!(edges[3], Edge { start: Tile { x: 1, y: 4 }, end: Tile {x: 1, y: 1}, direction: Direction::BT});
+    }
+
+    #[test]
+    fn test_edge_perpendicular() {
+        let e1 = Edge { start: Tile { x:3, y: 3}, end: Tile { x:5, y: 3}, direction: Direction::LR};
+        let e2 = Edge { start: Tile { x:4, y: 2}, end: Tile { x:4, y: 9}, direction: Direction::TB};
+        let e3 = Edge { start: Tile { x:5, y: 5}, end: Tile { x:9, y: 5}, direction: Direction::RL};
+        
+        assert!(e1.is_perpendicular(&e2));
+        assert!(! e3.is_perpendicular(&e1));
+    }
+
+    #[test]
+    fn test_edge_intersection() {
+        let e1 = Edge { start: Tile { x:3, y: 3}, end: Tile { x:5, y: 3}, direction: Direction::LR};
+        let e2 = Edge { start: Tile { x:5, y: 4}, end: Tile { x:5, y: 9}, direction: Direction::TB};
+        let e3 = Edge { start: Tile { x:4, y: 2}, end: Tile { x:4, y: 6}, direction: Direction::TB};
+
+        assert!(! e1.intersects(&e2));
+        assert!(e1.intersects(&e3));
+        
+    }
+
+    #[test]
+    fn test_perimeter_is_inside() {
+        let input = "7,1
+11,1
+11,7
+9,7
+9,5
+2,5
+2,3
+7,3";
+        let tiles = parse_input(&input).unwrap();
+
+        let perimeter = Perimeter::new(&tiles);
+        assert!(perimeter.is_some());
+        let perimeter = perimeter.unwrap();
+
+        let rects = vec![
+            Rectangle::new(&Tile { x: 7, y: 3}, &Tile {x:11, y:1}),
+        ];
+
+        assert!(rects.par_iter().all(|r| perimeter.is_inside(r)));
+
     }
 }
