@@ -178,13 +178,13 @@ impl Edge {
                 other.start.x.min(other.end.x) < min_x && 
                 other.end.x.max(other.start.x) > max_x &&
                 min_y < other.start.y.min(other.end.y) &&
-                max_y > other.end.y.max(other.end.x)
+                max_y > other.end.y.max(other.start.y)
                 { //horizontal case so other is vertical
                 //println!("horizontal intersection between {}->{} and {}->{}", self.start.y, self.end.y, other.start.y, other.end.y);
                 true
             } else if min_y==max_y && 
                 other.start.y.min(other.end.y) < min_y && 
-                other.end.y.max(other.end.y) > max_y &&
+                other.end.y.max(other.start.y) > max_y &&
                 min_x < other.start.x.min(other.end.x) &&
                 max_x > other.end.x.max(other.start.x) { //horizontal case so other is vertical
                 //println!("vertical intersection {} {} {} {}", self.start.x, other.start.x, self.end.x, other.end.x);
