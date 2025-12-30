@@ -216,12 +216,26 @@ impl Perimeter {
         }
 
         //Test b: a ray cast to the outer axis intersects an odd number of perimeter edges
+        //Use the centre as a test point in order to avoid ambiguities if the rectangle edge coincides with the perimeter edge
         let edge_crossings = self.edges.par_iter()
             .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
             .filter(|pe| {
-                pe.start.x > rect.tile_a.x &&
-                    ( rect.tile_a.y > pe.start.y ) &&
-                    ( rect.tile_a.y <= pe.end.y )
+                let test_x = (rect.tile_a.x + rect.tile_b.x) / 2;
+                let test_y = (rect.tile_a.y + rect.tile_b.y) / 2;
+
+                // The edge must be to the right of our point
+                let edge_x = pe.start.x; // Vertical edges have constant X
+                if edge_x <= test_x {
+                    return false;
+                }
+                
+                // Get the Y-range of this vertical edge
+                let edge_min_y = pe.start.y.min(pe.end.y);
+                let edge_max_y = pe.start.y.max(pe.end.y);
+                
+                // Check if our ray's Y-coordinate intersects the edge's Y-range
+                // Use < and >= to handle edge cases consistently
+                test_y >= edge_min_y && test_y < edge_max_y
             })
             .count();
         //println!("Got {} edge crossings for {:?}->{:?})", edge_crossings, rect.tile_a, rect.tile_b);
