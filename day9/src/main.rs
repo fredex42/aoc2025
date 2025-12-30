@@ -165,7 +165,7 @@ impl Edge {
      * Checks if this edge intersects the other edge.  Touching does _not_ count as an intersection.
      */
     pub fn intersects(&self, other: &Edge) -> bool {
-        println!("Checking intersection of {:?} with {:?}", self, other );
+       // println!("Checking intersection of {:?} with {:?}", self, other );
         let min_x = self.start.x.min(self.end.x);
         let min_y = self.start.y.min(self.end.y);
         let max_x = self.start.x.max(self.end.x);
@@ -180,14 +180,14 @@ impl Edge {
                 min_y < other.start.y.min(other.end.y) &&
                 max_y > other.end.y.max(other.end.x)
                 { //horizontal case so other is vertical
-                println!("horizontal intersection between {}->{} and {}->{}", self.start.y, self.end.y, other.start.y, other.end.y);
+                //println!("horizontal intersection between {}->{} and {}->{}", self.start.y, self.end.y, other.start.y, other.end.y);
                 true
             } else if min_y==max_y && 
                 other.start.y.min(other.end.y) < min_y && 
                 other.end.y.max(other.end.y) > max_y &&
-                max_x < other.start.x.min(other.end.x) &&
-                min_y > other.end.y.max(other.start.y) { //horizontal case so other is vertical
-                println!("vertical intersection {} {} {} {}", self.start.x, other.start.x, self.end.x, other.end.x);
+                min_x < other.start.x.min(other.end.x) &&
+                max_x > other.end.x.max(other.start.x) { //horizontal case so other is vertical
+                //println!("vertical intersection {} {} {} {}", self.start.x, other.start.x, self.end.x, other.end.x);
                 true
             } else {
                 false
@@ -208,10 +208,10 @@ impl Perimeter {
         //Test a: no edges of the rectangle intersect the perimeter
         if rect.edges().iter().any(|re| {
             let v = self.edges.par_iter().any(|pe| pe.intersects(re));
-            println!("{}",v);
+            //println!("{}",v);
             v
         }) {
-            println!("at least 1 edge intersected");
+            //println!("at least 1 edge intersected");
             return false
         }
 
@@ -220,10 +220,11 @@ impl Perimeter {
             .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
             .filter(|pe| {
                 pe.start.x > rect.tile_a.x &&
-                    ( rect.tile_a.y.min(rect.tile_b.y) >= pe.start.y ) &&
-                    ( rect.tile_a.y.max(rect.tile_b.y) <= pe.start.y )
+                    ( rect.tile_a.y > pe.start.y ) &&
+                    ( rect.tile_a.y <= pe.end.y )
             })
             .count();
+        //println!("Got {} edge crossings for {:?}->{:?})", edge_crossings, rect.tile_a, rect.tile_b);
         edge_crossings % 2 == 1
     }
 
@@ -436,6 +437,18 @@ fn main() ->Result<(), Box<dyn Error>> {
         Some(last_pair)=>println!("The largest area is {}", last_pair.area_of_rectangle()),
         None=>println!("ERROR! The list of pairs was empty :-/")
     }
+
+    let perimeter = Perimeter::new(&tiles).expect("Provided points did not form a closed perimeter");
+
+    let mut pairs_in_perim:Vec<&Rectangle<'_>> = pairs.par_iter()
+        .filter(|rec| perimeter.is_inside(rec))
+        .collect();
+    pairs_in_perim.sort_by(|ra, rb| ra.area_of_rectangle().cmp(&rb.area_of_rectangle()));
+    match pairs_in_perim.last() {
+        Some(last_pair)=>println!("The largest area in the perimeter is {}", last_pair.area_of_rectangle()),
+        None=>println!("ERROR! There were no pairs inside the perimeter :-/")
+    }
+
     Ok( () )
 }
 
@@ -559,8 +572,9 @@ mod test {
         let e3 = Edge { start: Tile { x:4, y: 2}, end: Tile { x:4, y: 6}, direction: Direction::TB};
 
         assert!(! e1.intersects(&e2));
+        assert!(! e2.intersects(&e1));
+        assert!(e3.intersects(&e1));
         assert!(e1.intersects(&e3));
-        
     }
 
     #[test]
@@ -581,6 +595,8 @@ mod test {
 
         let rects = vec![
             Rectangle::new(&Tile { x: 7, y: 3}, &Tile {x:11, y:1}),
+            Rectangle::new(&Tile { x: 9, y: 7}, &Tile {x:9, y:5}),
+            Rectangle::new(&Tile { x: 9, y: 5}, &Tile {x:2, y:3}),
         ];
 
         assert!(rects.par_iter().all(|r| perimeter.is_inside(r)));
