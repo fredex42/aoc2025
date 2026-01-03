@@ -194,6 +194,30 @@ impl Edge {
             }
         }
     }
+
+    pub fn new(start: &Tile, end: &Tile) -> Edge {
+        let direction = if start.x==end.x {   //vertical case
+            if start.y > end.y {    //start is lower than end
+                Direction::BT 
+            } else if start.y==end.y {
+                panic!("the provided start and edge points describe a zero-length edge");
+            } else {
+                Direction::TB
+            }
+        } else if start.y==end.y { //horizontal case
+            if start.x > end.x { //start is to the right of end
+                Direction::RL
+            } else if start.x==end.x {
+                panic!("the provided start and edge points describe a zero-length edge");
+            } else {
+                Direction::LR
+            }
+        } else {
+            panic!("the provided start and end points do not describe a correctly aligned edge");
+        };
+
+        Edge { start: *start, end: *end, direction }
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -361,51 +385,67 @@ impl Perimeter {
      * Constructs a perimeter from the given control points
      */
     pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter> {
-        let mut edges: Vec<Edge> = vec![];
-
-        let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
-        if cp_set.is_empty() {
+        if control_points.len() < 2 {
             return None
         }
 
-        //Find the top-left of the incoming control points
-        let start_point = Self::find_topleft(control_points);
-        //Don't remove the initial controlpoint from the set. It should be the last one we come to.
-        let mut current = start_point;
-
-        let mut current_direction = Direction::LR;  //start going left-right
-        let mut starting_direction = current_direction;
-        while ! cp_set.is_empty() {
-            match Self::next_controlpoint(current, &cp_set, current_direction) {
-                Some(tile)=>{
-                    //Great, we found a control point.
-                    let next_edge = Edge { start: *current, end: *tile, direction: current_direction };
-                    edges.push(next_edge);
-                    //If we got back to where we started, we have a perimeter!
-                    if tile == start_point {
-                        break;
-                    }
-                    //Remove this now connected control point from the set and iterate to find the next one
-                    cp_set.remove(tile);
-                    current = tile;
-                    starting_direction = current_direction;
-                    //Look for another control point 90 degrees further around the circle
-                    current_direction = current_direction.turn();
-                },
-                None=>{
-                    current_direction = current_direction.turn();
-                    if current_direction==starting_direction {
-                        //We went through 360 degrees without finding any control point to link to.
-                        //Crucially we did check if there was another point on the same line
-                        println!("ERROR! Ran out of valid control points after {:?}", current);
-                        return None
-                    } else if current_direction.is_inverse(&starting_direction) {
-                        //Don't traverse back the way we came otherwise we get stuck in a loop. Nudge on to the next possible direction
-                        current_direction = current_direction.turn();
-                    }
-                }
-            }
+        let mut edges: Vec<Edge> = vec![];
+        
+        //Let's assume that the control_points vec is already correctly ordered
+        let (start_point, remaining_points) = control_points.split_first().unwrap();    //unwrap is safe as we already checked is_empty
+        let mut next_point = start_point;
+        for cp in remaining_points {
+            let next_edge = Edge::new(next_point, cp);
+            edges.push(next_edge);
+            next_point = cp;
         }
+        let end = control_points.last().unwrap();
+        let final_edge = Edge::new(end, start_point);
+        edges.push(final_edge);
+
+        // let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
+        // if cp_set.is_empty() {
+        //     return None
+        // }
+
+        // //Find the top-left of the incoming control points
+        // let start_point = Self::find_topleft(control_points);
+        // //Don't remove the initial controlpoint from the set. It should be the last one we come to.
+        // let mut current = start_point;
+
+        // let mut current_direction = Direction::LR;  //start going left-right
+        // let mut starting_direction = current_direction;
+        // while ! cp_set.is_empty() {
+        //     match Self::next_controlpoint(current, &cp_set, current_direction) {
+        //         Some(tile)=>{
+        //             //Great, we found a control point.
+        //             let next_edge = Edge { start: *current, end: *tile, direction: current_direction };
+        //             edges.push(next_edge);
+        //             //If we got back to where we started, we have a perimeter!
+        //             if tile == start_point {
+        //                 break;
+        //             }
+        //             //Remove this now connected control point from the set and iterate to find the next one
+        //             cp_set.remove(tile);
+        //             current = tile;
+        //             starting_direction = current_direction;
+        //             //Look for another control point 90 degrees further around the circle
+        //             current_direction = current_direction.turn();
+        //         },
+        //         None=>{
+        //             current_direction = current_direction.turn();
+        //             if current_direction==starting_direction {
+        //                 //We went through 360 degrees without finding any control point to link to.
+        //                 //Crucially we did check if there was another point on the same line
+        //                 println!("ERROR! Ran out of valid control points after {:?}", current);
+        //                 return None
+        //             } else if current_direction.is_inverse(&starting_direction) {
+        //                 //Don't traverse back the way we came otherwise we get stuck in a loop. Nudge on to the next possible direction
+        //                 current_direction = current_direction.turn();
+        //             }
+        //         }
+        //     }
+        // }
 
         Some(Perimeter { edges })
     }
@@ -615,5 +655,29 @@ mod test {
 
         assert!(rects.par_iter().all(|r| perimeter.is_inside(r)));
 
+    }
+
+    /// A rectangle whose centre is inside the perimeter but whose right edge
+    /// extends beyond the perimeter boundary. With correct logic this should
+    /// be classified as outside, but the current implementation will report
+    /// it as inside, exposing the limitation described in the discussion.
+    #[test]
+    fn test_perimeter_is_inside_overhangs_outside() {
+        // Simple axis-aligned rectangular perimeter from (0,0) to (10,10)
+        let input = "0,0
+10,0
+10,10
+0,10";
+        let tiles = parse_input(&input).unwrap();
+
+        let perimeter = Perimeter::new(&tiles).unwrap();
+
+        // Rectangle that shares three sides with the perimeter but extends
+        // one unit beyond the right edge to x=11. Its centre is at (5,5),
+        // which lies inside the perimeter, but part of the rectangle is
+        // outside, so a correct implementation should return false here.
+        let rect = Rectangle::new(&Tile { x: 0, y: 0 }, &Tile { x: 11, y: 10 });
+
+        assert!(!perimeter.is_inside(&rect));
     }
 }
