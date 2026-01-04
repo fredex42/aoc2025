@@ -1,4 +1,4 @@
-use std::{collections::HashSet, error::Error, fs::File, hash::RandomState, io::Read};
+use std::{collections::HashSet, error::Error, fs::File, hash::RandomState, io::Read, mem::take};
 use rayon::iter::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 
@@ -176,13 +176,40 @@ impl Edge {
     //Return a list of points in this line, at integer resolution
     pub fn points(&self) -> Vec<Tile> {
         let min_x = self.start.x.min(self.end.x);
-        let max_x = self.start.x.max(self.end.x)+1;
+        let max_x = self.start.x.max(self.end.x);
         let min_y = self.start.y.min(self.end.y);
-        let max_y = self.start.y.max(self.end.y)+1;
+        let max_y = self.start.y.max(self.end.y);
 
         (min_x..max_x).flat_map(|x| {
             (min_y..max_y).map(move |y| Tile {x, y})
         }).collect()
+    }
+
+    pub fn minimal_points(&self) -> Vec<Tile> {
+        let min_x = self.start.x.min(self.end.x);
+        let max_x = self.start.x.max(self.end.x);
+        let min_y = self.start.y.min(self.end.y);
+        let max_y = self.start.y.max(self.end.y);
+
+        //Try for 
+        let first_try:Vec<Tile> = vec![
+            Tile { x: min_x+1, y: min_y+1},
+            Tile { x: max_x-1, y: min_y+1},
+            Tile { x: max_x-1, y: max_y-1},
+            Tile { x: min_x+1, y: max_y-1},
+            Tile { x: (min_x + max_x)/2, y: (min_y + max_y)/2}
+        ]
+            .into_iter()
+            .filter(|tile| tile.x>=min_x && tile.x<=max_x && tile.y>=min_y &&tile.y<=max_y).collect();
+
+        if first_try.is_empty() {
+            vec![
+                Tile {x: min_x, y:min_y},
+                Tile {x: max_x, y: max_y}
+            ]
+        } else {
+            first_try
+        }
     }
 }
 
@@ -342,7 +369,8 @@ impl Perimeter {
             //We lie on the edge, if P is between start and end, AND it lies on a straight line between the two
             //The second of those conditions is determined by the area of the related triangle being 0, but is implicit if the edges are axis aligned
             if edge.x_in_range(point) && edge.y_in_range(point) {
-                on_edge = true
+                on_edge = true;
+                break;
             }
         }
 
@@ -351,7 +379,9 @@ impl Perimeter {
 
     pub fn rectangle_sits_inside(&self, pair: &TilePair) -> bool {
         //pair.corners_of_rectangle().par_iter().all(|corner| self.sits_inside(corner))
-        pair.diagonals_of_rectangle().iter().flat_map(|d| d.points()).all(|point| self.sits_inside(&point))
+        pair.diagonals_of_rectangle().par_iter()
+            .flat_map(|d| d.minimal_points())
+            .all(|point| self.sits_inside(&point))
     }
 
     /**
@@ -455,16 +485,35 @@ fn main() ->Result<(), Box<dyn Error>> {
         None=>println!("ERROR! The list of pairs was empty :-/")
     }
 
-    let permimeter = Perimeter::new(&tiles).expect("Could not join points into a perimeter");
-    let valid_rectangles:Vec<&TilePair> = pairs.iter().filter(|rec| permimeter.rectangle_sits_inside(rec)).collect();
+    let total_count = pairs.len();
 
-    valid_rectangles.iter().for_each(|rec| {
-        println!("{:?} -> {:?}; {}", rec.tile_a, rec.tile_b, rec.area_of_rectangle());
-    });
-    match valid_rectangles.first() {
+    let permimeter = Perimeter::new(&tiles).expect("Could not join points into a perimeter");
+    // let valid_rectangles:Vec<&TilePair> = pairs.iter().filter(|rec| permimeter.rectangle_sits_inside(rec)).collect();
+
+    // valid_rectangles.iter().for_each(|rec| {
+    //     println!("{:?} -> {:?}; {}", rec.tile_a, rec.tile_b, rec.area_of_rectangle());
+    // });
+    // match valid_rectangles.first() {
+    //     Some(last_pair)=>println!("The largest rectangle inside the perimeter has an area of {}", last_pair.area_of_rectangle()),
+    //     None=>println!("ERROR! No rectangles lay within the perimeter :-/")
+    // }
+
+    println!("{} rectangles to check", total_count);
+    let mut i = 0;
+
+    //Since the rectangles are already sorted by area, we just need to find the first one that fits
+    let largest_in_perim = pairs.iter().filter(|rec| {
+        i += 1;
+        // if (i % 10)==0 {
+            println!("{} %", ((i as f64) / (total_count as f64)) * 100.0);
+        //}
+        permimeter.rectangle_sits_inside(rec)
+    }).next();
+    match largest_in_perim {
         Some(last_pair)=>println!("The largest rectangle inside the perimeter has an area of {}", last_pair.area_of_rectangle()),
         None=>println!("ERROR! No rectangles lay within the perimeter :-/")
     }
+
     Ok( () )
 }
 
