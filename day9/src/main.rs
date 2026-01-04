@@ -48,7 +48,7 @@ impl TilePair<'_> {
         let tl = Tile { x: self.tile_a.x.min(self.tile_b.x), y: self.tile_a.y.min(self.tile_b.y)};
         let bl = Tile { x: self.tile_a.x.min(self.tile_b.x), y: self.tile_a.y.max(self.tile_b.y)};
         let tr = Tile { x: self.tile_a.x.max(self.tile_b.x), y: self.tile_a.y.min(self.tile_b.y)};
-        let br = Tile { x: self.tile_a.x.max(self.tile_b.x), y: self.tile_b.y.max(self.tile_b.y)};
+        let br = Tile { x: self.tile_a.x.max(self.tile_b.x), y: self.tile_a.y.max(self.tile_b.y)};
 
         vec![
             Edge { start: tl, end: tr},
@@ -135,6 +135,25 @@ pub struct Perimeter {
     edges: Vec<Edge>
 }
 
+fn edge_fully_inside_rect(rect: &TilePair, edge: &Edge) -> bool {
+    let minx = rect.tile_a.x.min(rect.tile_b.x);
+    let maxx = rect.tile_a.x.max(rect.tile_b.x);
+    let miny = rect.tile_a.y.min(rect.tile_b.y);
+    let maxy = rect.tile_a.y.max(rect.tile_b.y);
+
+    if edge.is_vertical() {
+        let x = edge.start.x;
+        x > minx && x < maxx &&
+            edge.min_y() > miny &&
+            edge.max_y() < maxy
+    } else {
+        let y = edge.start.y;
+        y > miny && y < maxy &&
+            edge.min_x() > minx &&
+            edge.max_x() < maxx
+    }
+}
+
 impl Perimeter {
         /**
      * Constructs a perimeter from the given control points
@@ -198,6 +217,14 @@ impl Perimeter {
             .count();
         edge_crossings % 2 == 1
     }
+
+    /**
+     * Check if any of the edges of `rect` lie fully inside the given
+     * perimeter
+     */
+    pub fn has_edge_fully_inside_rect(&self, rect: &TilePair) -> bool {
+        self.edges.par_iter().any(|e| edge_fully_inside_rect(rect, e))
+    }
 }
 
 pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
@@ -250,8 +277,8 @@ fn main() ->Result<(), Box<dyn Error>> {
             ! crosses_perimeter
         })
         .filter(|rect| {
-            let centre = rect.centre_of_rectangle();
-            perimeter.point_is_inside(&centre)
+            let contains_perimeter_edge = perimeter.has_edge_fully_inside_rect(rect);
+            ! contains_perimeter_edge
         })
         .next();
     
