@@ -44,6 +44,20 @@ impl Rectangle<'_> {
         ).try_into().expect("there was an integer overflow calculating area")
     }
 
+    pub fn corners(&self, nudge: i64) -> Vec<Tile> {
+        let min_x = self.tile_a.x.min(self.tile_b.x);
+        let max_x = self.tile_a.x.max(self.tile_b.x);
+        let min_y = self.tile_a.y.min(self.tile_b.y);
+        let max_y = self.tile_a.y.max(self.tile_b.y);
+
+        vec![
+            Tile { x: min_x + nudge, y: min_y + nudge },
+            Tile { x: min_x + nudge, y: max_y - nudge },
+            Tile { x: max_x - nudge, y: min_y + nudge },
+            Tile { x: max_x - nudge, y: max_y - nudge }
+        ]
+    }
+
     /**
      * Returns a list of four edges that define the rectangle
      */
@@ -152,6 +166,12 @@ impl Edge {
         }
     }
 
+    pub fn length(&self) -> i64 {
+        let x = (self.end.x - self.start.x).pow(2);
+        let y = (self.end.y - self.start.y).pow(2);
+        (x + y).isqrt()
+    }
+
     /**
      * Checks if this edge is perpendicular to the other one.
      * Note, this assumes that the edges are axis-aligned
@@ -240,30 +260,58 @@ impl Perimeter {
         }
 
         //Test b: a ray cast to the outer axis intersects an odd number of perimeter edges
-        //Use the centre as a test point in order to avoid ambiguities if the rectangle edge coincides with the perimeter edge
-        let edge_crossings = self.edges.par_iter()
-            .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
-            .filter(|pe| {
-                let test_x = (rect.tile_a.x + rect.tile_b.x) / 2;
-                let test_y = (rect.tile_a.y + rect.tile_b.y) / 2;
+        //We're going to need to cast from a point _just inside_ each corner of the rectangle
+        if rect.edges().iter().any(|e| e.length()<3) {
+            //If the edges are not long enough to nudge in, use a center-point test
+            let test_x = (rect.tile_a.x + rect.tile_b.x) / 2;
+            let test_y = (rect.tile_a.y + rect.tile_b.y) / 2; 
 
-                // The edge must be to the right of our point
-                let edge_x = pe.start.x; // Vertical edges have constant X
-                if edge_x <= test_x {
-                    return false;
-                }
-                
-                // Get the Y-range of this vertical edge
-                let edge_min_y = pe.start.y.min(pe.end.y);
-                let edge_max_y = pe.start.y.max(pe.end.y);
-                
-                // Check if our ray's Y-coordinate intersects the edge's Y-range
-                // Use < and >= to handle edge cases consistently
-                test_y >= edge_min_y && test_y < edge_max_y
+            let edge_crossings = self.edges.par_iter()
+                .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
+                .filter(|pe| {
+                    // The edge must be to the right of our point
+                    let edge_x = pe.start.x; // Vertical edges have constant X
+                    if edge_x <= test_x {
+                        return false;
+                    }
+
+                    // Get the Y-range of this vertical edge
+                    let edge_min_y = pe.start.y.min(pe.end.y);
+                    let edge_max_y = pe.start.y.max(pe.end.y);
+                    
+                    // Check if our ray's Y-coordinate intersects the edge's Y-range
+                    // Use < and >= to handle edge cases consistently
+                    test_y >= edge_min_y && test_y < edge_max_y
+                })
+                .count();
+            edge_crossings % 2 == 1
+        } else {
+            rect.corners(1).par_iter().all(|corner| {
+                let edge_crossings = self.edges.par_iter()
+                    .filter(|pe| pe.direction==Direction::TB || pe.direction==Direction::BT)
+                    .filter(|pe| {
+                        let test_x = corner.x;
+                        let test_y = corner.y;
+
+                        // The edge must be to the right of our point
+                        let edge_x = pe.start.x; // Vertical edges have constant X
+                        if edge_x <= test_x {
+                            return false;
+                        }
+                        
+                        // Get the Y-range of this vertical edge
+                        let edge_min_y = pe.start.y.min(pe.end.y);
+                        let edge_max_y = pe.start.y.max(pe.end.y);
+                        
+                        // Check if our ray's Y-coordinate intersects the edge's Y-range
+                        // Use < and >= to handle edge cases consistently
+                        test_y >= edge_min_y && test_y < edge_max_y
+                    })
+                    .count();
+                //println!("Got {} edge crossings for {:?}->{:?})", edge_crossings, rect.tile_a, rect.tile_b);
+                edge_crossings % 2 == 1
             })
-            .count();
-        //println!("Got {} edge crossings for {:?}->{:?})", edge_crossings, rect.tile_a, rect.tile_b);
-        edge_crossings % 2 == 1
+        }
     }
 
     //Note, the set _must not be empty_ otherwise this will panic
@@ -402,50 +450,6 @@ impl Perimeter {
         let end = control_points.last().unwrap();
         let final_edge = Edge::new(end, start_point);
         edges.push(final_edge);
-
-        // let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
-        // if cp_set.is_empty() {
-        //     return None
-        // }
-
-        // //Find the top-left of the incoming control points
-        // let start_point = Self::find_topleft(control_points);
-        // //Don't remove the initial controlpoint from the set. It should be the last one we come to.
-        // let mut current = start_point;
-
-        // let mut current_direction = Direction::LR;  //start going left-right
-        // let mut starting_direction = current_direction;
-        // while ! cp_set.is_empty() {
-        //     match Self::next_controlpoint(current, &cp_set, current_direction) {
-        //         Some(tile)=>{
-        //             //Great, we found a control point.
-        //             let next_edge = Edge { start: *current, end: *tile, direction: current_direction };
-        //             edges.push(next_edge);
-        //             //If we got back to where we started, we have a perimeter!
-        //             if tile == start_point {
-        //                 break;
-        //             }
-        //             //Remove this now connected control point from the set and iterate to find the next one
-        //             cp_set.remove(tile);
-        //             current = tile;
-        //             starting_direction = current_direction;
-        //             //Look for another control point 90 degrees further around the circle
-        //             current_direction = current_direction.turn();
-        //         },
-        //         None=>{
-        //             current_direction = current_direction.turn();
-        //             if current_direction==starting_direction {
-        //                 //We went through 360 degrees without finding any control point to link to.
-        //                 //Crucially we did check if there was another point on the same line
-        //                 println!("ERROR! Ran out of valid control points after {:?}", current);
-        //                 return None
-        //             } else if current_direction.is_inverse(&starting_direction) {
-        //                 //Don't traverse back the way we came otherwise we get stuck in a loop. Nudge on to the next possible direction
-        //                 current_direction = current_direction.turn();
-        //             }
-        //         }
-        //     }
-        // }
 
         Some(Perimeter { edges })
     }
