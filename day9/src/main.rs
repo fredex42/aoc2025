@@ -24,14 +24,14 @@ impl Tile {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub struct TilePair<'a> {
-    tile_a: &'a Tile,
-    tile_b: &'a Tile
+pub struct TilePair {
+    tile_a: Tile,
+    tile_b: Tile
 }
 
-impl TilePair<'_> {
-    pub fn new<'a>(tile_a: &'a Tile, tile_b: &'a Tile) -> TilePair<'a> {
-        TilePair { tile_a, tile_b }
+impl TilePair {
+    pub fn new(tile_a: &Tile, tile_b: &Tile) -> TilePair {
+        TilePair { tile_a: *tile_a, tile_b: *tile_b }
     }
 
     pub fn area_of_rectangle(&self) -> u64 {
@@ -52,9 +52,24 @@ impl TilePair<'_> {
             Tile { x: self.tile_b.x, y: self.tile_b.y}
         ]
     }
+
+    pub fn diagonals_of_rectangle(&self) -> Vec<Edge> {
+        vec![
+            Edge { 
+                start: Tile { x: self.tile_a.x.min(self.tile_b.x), y: self.tile_a.y.min(self.tile_b.y)},
+                end: Tile { x: self.tile_a.x.max(self.tile_b.x), y: self.tile_a.y.max(self.tile_b.y)},
+                direction: Direction::Diag
+            },
+            Edge {
+                start: Tile { x: self.tile_a.x.min(self.tile_b.x), y: self.tile_a.y.max(self.tile_b.y)},
+                end: Tile { x: self.tile_a.x.max(self.tile_b.x), y: self.tile_a.y.min(self.tile_b.y)},
+                direction: Direction::Diag
+            }
+        ]
+    }
 }
 
-impl PartialOrd for TilePair<'_> {
+impl PartialOrd for TilePair {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         if self.area_of_rectangle() < other.area_of_rectangle() {
             Some(std::cmp::Ordering::Less)
@@ -66,7 +81,7 @@ impl PartialOrd for TilePair<'_> {
     }
 }
 
-impl Ord for TilePair<'_> {
+impl Ord for TilePair {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         if self.area_of_rectangle() < other.area_of_rectangle() {
             std::cmp::Ordering::Less
@@ -83,7 +98,8 @@ pub enum Direction {
     LR, //Left->Right
     RL, //Right-Left
     TB, //Top-Bottom
-    BT  //Bottom-top
+    BT,  //Bottom-top
+    Diag
 }
 
 impl Direction {
@@ -95,7 +111,8 @@ impl Direction {
             Self::LR=>Self::TB,
             Self::TB=>Self::RL,
             Self::RL=>Self::BT,
-            Self::BT=>Self::LR
+            Self::BT=>Self::LR,
+            Self::Diag=>Self::Diag
         }
     }
 
@@ -107,7 +124,8 @@ impl Direction {
             Self::LR=>*other==Self::RL,
             Self::TB=>*other==Self::BT,
             Self::RL=>*other==Self::LR,
-            Self::BT=>*other==Self::TB
+            Self::BT=>*other==Self::TB,
+            Self::Diag=>false
         }
     }
 }
@@ -117,13 +135,13 @@ impl Direction {
  * determine "inside" and "outside"
  */
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Edge<'a> {
-    start: &'a Tile,
-    end: &'a Tile,
+pub struct Edge {
+    start: Tile,
+    end: Tile,
     direction: Direction
 }
 
-impl Edge<'_> {
+impl Edge {
     // /**
     //  * Checks if a given point lies within the polygon defined by this vector.
     //  * This assumes that the polygon was constructed in a clockwise-following manner;
@@ -154,16 +172,28 @@ impl Edge<'_> {
 
         point.y >= min_y && point.y <= max_y
     }
+
+    //Return a list of points in this line, at integer resolution
+    pub fn points(&self) -> Vec<Tile> {
+        let min_x = self.start.x.min(self.end.x);
+        let max_x = self.start.x.max(self.end.x)+1;
+        let min_y = self.start.y.min(self.end.y);
+        let max_y = self.start.y.max(self.end.y)+1;
+
+        (min_x..max_x).flat_map(|x| {
+            (min_y..max_y).map(move |y| Tile {x, y})
+        }).collect()
+    }
 }
 
 #[derive(Clone, PartialEq, Eq)]
-pub struct Perimeter<'a> {
-    edges: Vec<Edge<'a>>,
+pub struct Perimeter {
+    edges: Vec<Edge>,
     x_max: i64,
     y_max: i64
 }
 
-impl Perimeter<'_> {
+impl Perimeter {
     //Note, the set _must not be empty_ otherwise this will panic
     fn find_topleft<'a>(set: &'a Vec<Tile>) -> &'a Tile {
         let mut min:&'a Tile;
@@ -275,6 +305,9 @@ impl Perimeter<'_> {
                 });
 
                 ordered_candidates.first().map(|(_, tile)| &***tile)
+            },
+            Direction::Diag=>{
+                panic!("There should not be diagonals in the perimeter")
             }
         }
     }
@@ -317,13 +350,14 @@ impl Perimeter<'_> {
     }
 
     pub fn rectangle_sits_inside(&self, pair: &TilePair) -> bool {
-        pair.corners_of_rectangle().par_iter().all(|corner| self.sits_inside(corner))
+        //pair.corners_of_rectangle().par_iter().all(|corner| self.sits_inside(corner))
+        pair.diagonals_of_rectangle().iter().flat_map(|d| d.points()).all(|point| self.sits_inside(&point))
     }
 
     /**
      * Constructs a perimeter from the given control points
      */
-    pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter<'a>> {
+    pub fn new<'a>(control_points: &'a Vec<Tile>) -> Option<Perimeter> {
         let mut edges: Vec<Edge> = vec![];
 
         let mut cp_set:HashSet<&Tile, RandomState> = HashSet::from_iter(control_points.iter());
@@ -343,7 +377,7 @@ impl Perimeter<'_> {
                 Some(tile)=>{
                     //println!("Found {:?} following {:?} going {:?}", tile, current, current_direction);
                     //Great, we found a control point.
-                    let next_edge = Edge { start: current, end: tile, direction: current_direction };
+                    let next_edge = Edge { start: *current, end: *tile, direction: current_direction };
                     edges.push(next_edge);
                     //If we got back to where we started, we have a perimeter!
                     if tile == start_point {
@@ -379,7 +413,7 @@ impl Perimeter<'_> {
     }
 }
 
-pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
+pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair> {
     let top:usize = tiles.len();
 
     (0_usize..top).into_par_iter()
@@ -508,14 +542,14 @@ mod test {
         assert!(perimeter.is_some());
         let perimeter = perimeter.unwrap();
         assert_eq!(perimeter.edges.len(), 8);
-        assert_eq!(perimeter.edges[0], Edge { start: &Tile { x: 7, y: 1 }, end: &Tile { x: 11, y: 1}, direction: Direction::LR});
-        assert_eq!(perimeter.edges[1], Edge { start: &Tile { x: 11, y: 1}, end: &Tile { x: 11, y: 7}, direction: Direction::TB});
-        assert_eq!(perimeter.edges[2], Edge { start: &Tile { x: 11, y: 7 }, end: &Tile { x: 9, y: 7}, direction: Direction::RL});
-        assert_eq!(perimeter.edges[3], Edge { start: &Tile { x: 9, y: 7}, end: &Tile { x: 9, y: 5}, direction: Direction::BT});
-        assert_eq!(perimeter.edges[4], Edge { start: &Tile { x: 9, y: 5 }, end: &Tile { x:2, y: 5}, direction: Direction::RL});
-        assert_eq!(perimeter.edges[5], Edge { start: &Tile { x: 2, y: 5}, end: &Tile { x: 2, y: 3}, direction: Direction::BT});
-        assert_eq!(perimeter.edges[6], Edge { start: &Tile { x: 2, y: 3 }, end: &Tile { x: 7, y: 3}, direction: Direction::LR});
-        assert_eq!(perimeter.edges[7], Edge { start: &Tile { x: 7, y: 3}, end: &Tile { x: 7, y: 1}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[0], Edge { start: Tile { x: 7, y: 1 }, end: Tile { x: 11, y: 1}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[1], Edge { start: Tile { x: 11, y: 1}, end: Tile { x: 11, y: 7}, direction: Direction::TB});
+        assert_eq!(perimeter.edges[2], Edge { start: Tile { x: 11, y: 7 }, end: Tile { x: 9, y: 7}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[3], Edge { start: Tile { x: 9, y: 7}, end: Tile { x: 9, y: 5}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[4], Edge { start: Tile { x: 9, y: 5 }, end: Tile { x:2, y: 5}, direction: Direction::RL});
+        assert_eq!(perimeter.edges[5], Edge { start: Tile { x: 2, y: 5}, end: Tile { x: 2, y: 3}, direction: Direction::BT});
+        assert_eq!(perimeter.edges[6], Edge { start: Tile { x: 2, y: 3 }, end: Tile { x: 7, y: 3}, direction: Direction::LR});
+        assert_eq!(perimeter.edges[7], Edge { start: Tile { x: 7, y: 3}, end: Tile { x: 7, y: 1}, direction: Direction::BT});
     }
 
     #[test]
