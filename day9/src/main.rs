@@ -57,6 +57,13 @@ impl TilePair<'_> {
             Edge { start: tr, end: br}
         ]
     }
+
+    pub fn centre_of_rectangle(&self) -> Tile {
+        Tile {
+            x: (self.tile_a.x + self.tile_b.x) / 2,
+            y: (self.tile_a.y + self.tile_b.y) / 2
+        }
+    }
 }
 
 impl PartialOrd for TilePair<'_> {
@@ -177,6 +184,20 @@ impl Perimeter {
                 }
             })
     }
+
+    /**
+     * Test if a point is inside the polygon.  If a line cast to the right intersects an
+     * odd number of edges, this sould be the case
+     */
+    pub fn point_is_inside(&self, point: &Tile) -> bool {
+        let edge_crossings = self.edges.par_iter()
+            .filter(|edge| {
+                edge.is_vertical() && edge.start.x >= point.x &&
+                    point.y >= edge.min_y() && point.y < edge.max_y()
+            })
+            .count();
+        edge_crossings % 2 == 1
+    }
 }
 
 pub fn pair_up<'a>(tiles: &'a Vec<Tile>) -> Vec<TilePair<'a>> {
@@ -227,7 +248,12 @@ fn main() ->Result<(), Box<dyn Error>> {
         .filter(|rect| {
             let crosses_perimeter = rect.edges_of_rectangle().par_iter().any(|edge| perimeter.edge_crosses(edge));
             ! crosses_perimeter
-        }).next();
+        })
+        .filter(|rect| {
+            let centre = rect.centre_of_rectangle();
+            perimeter.point_is_inside(&centre)
+        })
+        .next();
     
     match largest_fitting_rect {
         Some(rect)=>println!("The largest rectangle that fitted was {}", rect.area_of_rectangle()),
